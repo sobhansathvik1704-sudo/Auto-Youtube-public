@@ -60,6 +60,8 @@ class Settings(BaseSettings):
     youtube_token_file: str = "youtube_token.json"
 
     thumbnail_provider: str = "pillow"  # "pillow" or "dalle"
+    pexels_api_key: str = ""
+    image_provider: str = "gradient"  # "pexels" or "gradient"
 
     model_config = SettingsConfigDict(
         env_file=".env.example",

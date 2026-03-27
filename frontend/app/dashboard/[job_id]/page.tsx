@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { videoJobsApi, VideoJob } from "@/lib/api";
+import { videoJobsApi, VideoJob, SEOMetadata } from "@/lib/api";
 import { isAuthenticated, removeToken, getToken } from "@/lib/auth";
 
 const PIPELINE_STEPS = [
@@ -283,17 +283,150 @@ function ThumbnailPreview({
       className="w-full rounded-xl object-cover"
       style={{ maxHeight: "360px" }}
     />
+function SEOPreview({ seo }: { seo: SEOMetadata }) {
+  const [showFullDesc, setShowFullDesc] = useState(false);
+  const TITLE_MAX = 100;
+  const DESC_PREVIEW_CHARS = 300;
+  const titleLen = seo.title.length;
+  const titleColor =
+    titleLen <= 60
+      ? "text-green-600 dark:text-green-400"
+      : titleLen <= 100
+      ? "text-yellow-600 dark:text-yellow-400"
+      : "text-red-600 dark:text-red-400";
+
+  const descLen = seo.description.length;
+  const descColor =
+    descLen >= 300 && descLen <= 5000
+      ? "text-green-600 dark:text-green-400"
+      : "text-yellow-600 dark:text-yellow-400";
+
+  const tagCount = seo.tags.length;
+  const tagColor =
+    tagCount >= 15
+      ? "text-green-600 dark:text-green-400"
+      : tagCount >= 8
+      ? "text-yellow-600 dark:text-yellow-400"
+      : "text-red-600 dark:text-red-400";
+
+  const YOUTUBE_CATEGORIES: Record<number, string> = {
+    28: "Science & Technology",
+    27: "Education",
+    24: "Entertainment",
+    22: "People & Blogs",
+    20: "Gaming",
+    10: "Music",
+    17: "Sports",
+  };
+
+  return (
+    <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm p-6 mb-6">
+      <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50 mb-5">
+        🔍 SEO Preview
+      </h2>
+
+      {/* Quality indicators */}
+      <div className="flex flex-wrap gap-3 mb-5 text-xs font-medium">
+        <span className={`flex items-center gap-1 ${titleColor}`}>
+          📝 Title: {titleLen}/{TITLE_MAX} chars
+        </span>
+        <span className={`flex items-center gap-1 ${descColor}`}>
+          📄 Description: {descLen} chars
+        </span>
+        <span className={`flex items-center gap-1 ${tagColor}`}>
+          🏷️ Tags: {tagCount}
+        </span>
+      </div>
+
+      {/* Title */}
+      <div className="mb-4">
+        <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1">
+          Title
+        </p>
+        <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200 bg-zinc-50 dark:bg-zinc-800 rounded-lg px-3 py-2">
+          {seo.title}
+        </p>
+      </div>
+
+      {/* Description */}
+      <div className="mb-4">
+        <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1">
+          Description
+        </p>
+        <div className="text-sm text-zinc-700 dark:text-zinc-300 bg-zinc-50 dark:bg-zinc-800 rounded-lg px-3 py-2 whitespace-pre-wrap">
+          {showFullDesc
+            ? seo.description
+            : seo.description.slice(0, DESC_PREVIEW_CHARS) +
+              (seo.description.length > DESC_PREVIEW_CHARS ? "…" : "")}
+        </div>
+        {seo.description.length > DESC_PREVIEW_CHARS && (
+          <button
+            onClick={() => setShowFullDesc((v) => !v)}
+            className="mt-1 text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
+          >
+            {showFullDesc ? "Show less" : "Show more"}
+          </button>
+        )}
+      </div>
+
+      {/* Tags */}
+      <div className="mb-4">
+        <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-2">
+          Tags
+        </p>
+        <div className="flex flex-wrap gap-1.5">
+          {seo.tags.map((tag) => (
+            <span
+              key={tag}
+              className="inline-flex items-center rounded-full bg-indigo-50 dark:bg-indigo-900/30 px-2.5 py-0.5 text-xs font-medium text-indigo-700 dark:text-indigo-300"
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* Hashtags */}
+      {seo.hashtags.length > 0 && (
+        <div className="mb-4">
+          <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-2">
+            Hashtags
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {seo.hashtags.map((ht) => (
+              <span
+                key={ht}
+                className="inline-flex items-center rounded-full bg-blue-50 dark:bg-blue-900/30 px-2.5 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-300"
+              >
+                {ht}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Category */}
+      <div>
+        <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1">
+          YouTube Category
+        </p>
+        <p className="text-sm text-zinc-700 dark:text-zinc-300">
+          {YOUTUBE_CATEGORIES[seo.category_id] ?? `Category ${seo.category_id}`}{" "}
+          <span className="text-zinc-400 dark:text-zinc-500">(ID: {seo.category_id})</span>
+        </p>
+      </div>
+    </div>
   );
 }
 
 export default function VideoJobDetailPage() {
-  const router = useRouter();
   const params = useParams<{ job_id: string }>();
   const jobId = params.job_id;
 
   const [job, setJob] = useState<VideoJob | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [seoData, setSeoData] = useState<SEOMetadata | null>(null);
   const [uploadStatus, setUploadStatus] = useState<
     "idle" | "loading" | "success" | "error"
   >("idle");

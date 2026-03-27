@@ -23,7 +23,7 @@ def calculate_next_run(cron_expression: str, timezone_str: str = "UTC") -> datet
 
 
 def cron_interval_seconds(cron_expression: str) -> float:
-    """Return the average interval in seconds between two consecutive runs."""
+    """Return the interval in seconds between the first two consecutive runs of the cron expression."""
     from datetime import timezone
 
     now = datetime.now(timezone.utc)

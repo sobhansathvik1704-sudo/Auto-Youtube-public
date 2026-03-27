@@ -412,7 +412,7 @@ def check_and_run_schedules() -> None:
         now = datetime.now(timezone.utc)
         due_schedules = db.scalars(
             select(Schedule).where(
-                Schedule.is_active == True,  # noqa: E712
+                Schedule.is_active,
                 Schedule.next_run_at <= now,
             )
         ).all()

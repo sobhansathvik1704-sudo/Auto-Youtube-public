@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { videoJobsApi, VideoJob } from "@/lib/api";
+import { videoJobsApi, VideoJob, VideoJobDownloadResponse } from "@/lib/api";
 
 const STATUS_COLORS: Record<string, string> = {
   queued: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300",
@@ -42,6 +42,9 @@ export default function VideoJobDetailPage() {
     "idle" | "loading" | "success" | "error"
   >("idle");
   const [uploadMessage, setUploadMessage] = useState("");
+  const [downloadInfo, setDownloadInfo] = useState<VideoJobDownloadResponse | null>(null);
+  const [downloadLoading, setDownloadLoading] = useState(false);
+  const [downloadError, setDownloadError] = useState("");
 
   const fetchJob = useCallback(() => {
     if (!jobId) return;
@@ -55,6 +58,26 @@ export default function VideoJobDetailPage() {
   useEffect(() => {
     fetchJob();
   }, [fetchJob]);
+
+  async function handleDownload() {
+    if (!jobId) return;
+    setDownloadLoading(true);
+    setDownloadError("");
+    try {
+      const info = await videoJobsApi.getDownloadUrl(jobId);
+      if (info.download_url) {
+        window.open(info.download_url, "_blank", "noopener,noreferrer");
+      } else {
+        setDownloadInfo(info);
+      }
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Could not fetch download link.";
+      setDownloadError(message);
+    } finally {
+      setDownloadLoading(false);
+    }
+  }
 
   async function handleUpload() {
     if (!jobId) return;
@@ -164,6 +187,35 @@ export default function VideoJobDetailPage() {
             )}
           </dl>
         </div>
+
+        {/* Download section */}
+        {isCompleted && (
+          <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm p-6 mb-6">
+            <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50 mb-4">
+              ⬇ Download Video
+            </h2>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4">
+              Download your rendered video file directly.
+            </p>
+            <button
+              onClick={handleDownload}
+              disabled={downloadLoading}
+              className="rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 text-sm font-semibold text-white transition-colors"
+            >
+              {downloadLoading ? "Fetching link…" : "Download Video"}
+            </button>
+            {downloadInfo && !downloadInfo.download_url && (
+              <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400 font-mono break-all">
+                {downloadInfo.storage_key}
+              </p>
+            )}
+            {downloadError && (
+              <p className="mt-3 text-sm rounded-lg px-3 py-2 bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                {downloadError}
+              </p>
+            )}
+          </div>
+        )}
 
         {/* YouTube section */}
         <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm p-6">

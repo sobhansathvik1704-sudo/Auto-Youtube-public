@@ -52,3 +52,9 @@ class YouTubeUploadResponse(BaseModel):
     job_id: str
     task_id: str
     message: str
+
+
+class VideoJobDownloadResponse(BaseModel):
+    job_id: str
+    storage_key: str
+    download_url: str | None

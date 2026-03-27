@@ -10,6 +10,7 @@ from app.db.models.video_job import VideoJob
 from app.schemas.video_job import (
     JobEventRead,
     VideoJobCreate,
+    VideoJobDownloadResponse,
     VideoJobRead,
     VideoJobStatusResponse,
     YouTubeUploadResponse,
@@ -107,6 +108,43 @@ def get_video_job_status(
     return VideoJobStatusResponse(
         job=VideoJobRead.model_validate(job),
         events=[JobEventRead.model_validate(event) for event in events],
+    )
+
+
+@router.get("/{job_id}/download", response_model=VideoJobDownloadResponse)
+def get_video_download_url(
+    job_id: str,
+    db: Session = Depends(get_database),
+    current_user: User = Depends(get_current_user),
+) -> VideoJobDownloadResponse:
+    """Return a download URL for the rendered video.
+
+    When the storage backend is S3 this generates a time-limited presigned
+    URL (valid for 1 hour).  For the local backend ``download_url`` is
+    ``None`` and ``storage_key`` contains the absolute path on the server.
+    """
+    from app.services.storage import StorageService
+
+    job = db.scalar(
+        select(VideoJob)
+        .join(Project, Project.id == VideoJob.project_id)
+        .where(VideoJob.id == job_id, Project.user_id == current_user.id)
+    )
+    if not job:
+        raise HTTPException(status_code=404, detail="Video job not found")
+
+    if job.status != "completed" or not job.render_storage_key:
+        raise HTTPException(
+            status_code=400,
+            detail="Video is not available yet. Wait until the job status is 'completed'.",
+        )
+
+    storage = StorageService()
+    download_url = storage.get_presigned_url(job.render_storage_key)
+    return VideoJobDownloadResponse(
+        job_id=job_id,
+        storage_key=job.render_storage_key,
+        download_url=download_url,
     )
 
 

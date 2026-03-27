@@ -42,6 +42,12 @@ export interface YouTubeUploadResponse {
   message: string;
 }
 
+export interface VideoJobDownloadResponse {
+  job_id: string;
+  storage_key: string;
+  download_url: string | null;
+}
+
 export const videoJobsApi = {
   list: (): Promise<VideoJob[]> =>
     apiClient.get<VideoJob[]>("/video-jobs").then((r) => r.data),
@@ -55,5 +61,10 @@ export const videoJobsApi = {
   uploadToYouTube: (id: string): Promise<YouTubeUploadResponse> =>
     apiClient
       .post<YouTubeUploadResponse>(`/video-jobs/${id}/upload`)
+      .then((r) => r.data),
+
+  getDownloadUrl: (id: string): Promise<VideoJobDownloadResponse> =>
+    apiClient
+      .get<VideoJobDownloadResponse>(`/video-jobs/${id}/download`)
       .then((r) => r.data),
 };

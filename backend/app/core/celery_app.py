@@ -8,6 +8,7 @@ celery_app = Celery(
     "youtube_ai_mvp",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
+    include=["app.services.jobs.tasks"],
 )
 
 celery_app.conf.update(

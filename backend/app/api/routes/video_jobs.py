@@ -1,4 +1,7 @@
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -145,6 +148,40 @@ def get_video_download_url(
         job_id=job_id,
         storage_key=job.render_storage_key,
         download_url=download_url,
+    )
+
+
+@router.get("/{job_id}/download/file")
+def download_video_file(
+    job_id: str,
+    db: Session = Depends(get_database),
+    current_user: User = Depends(get_current_user),
+) -> FileResponse:
+    """Stream the rendered video file directly from local storage."""
+    job = db.scalar(
+        select(VideoJob)
+        .join(Project, Project.id == VideoJob.project_id)
+        .where(VideoJob.id == job_id, Project.user_id == current_user.id)
+    )
+    if not job:
+        raise HTTPException(status_code=404, detail="Video job not found")
+    if job.status != "completed" or not job.render_storage_key:
+        raise HTTPException(status_code=400, detail="Video not ready yet")
+
+    file_path = Path(job.render_storage_key).resolve()
+    # Guard against path traversal: ensure the resolved path is within the expected storage root
+    from app.core.config import get_settings
+    storage_root = Path(get_settings().artifacts_dir).resolve()
+    if not str(file_path).startswith(str(storage_root)):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Video file not found on disk")
+
+    filename = f"{job.topic.replace(' ', '_')}_video.mp4" if job.topic else "video.mp4"
+    return FileResponse(
+        path=str(file_path),
+        media_type="video/mp4",
+        filename=filename,
     )
 
 

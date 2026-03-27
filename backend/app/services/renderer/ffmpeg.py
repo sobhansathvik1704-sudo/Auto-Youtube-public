@@ -9,6 +9,7 @@ from app.core.config import get_settings
 from app.db.models.asset import Asset
 from app.db.models.scene import Scene
 from app.db.models.video_job import VideoJob
+from app.services.renderer.code_highlight import render_code_scene_image
 from app.services.renderer.timeline import resolve_dimensions
 from app.utils.fs import ensure_dir
 
@@ -23,6 +24,29 @@ def _font(size: int):
 
 
 def create_scene_image(scene: Scene, width: int, height: int, output_path: Path) -> Path:
+    if scene.scene_type == "code_card":
+        asset_config = {}
+        if scene.asset_config_json:
+            try:
+                asset_config = json.loads(scene.asset_config_json)
+            except (json.JSONDecodeError, ValueError):
+                asset_config = {}
+
+        code_snippet = asset_config.get("code_snippet", "")
+        code_language = asset_config.get("code_language", "")
+
+        if code_snippet:
+            title = f"{code_language or 'Code'} snippet"
+            return render_code_scene_image(
+                code=code_snippet,
+                language=code_language,
+                title=title,
+                width=width,
+                height=height,
+                output_path=output_path,
+            )
+
+    # Default rendering for all non-code_card scenes (and code_card fallback)
     image = Image.new("RGB", (width, height), color=(12, 24, 48))
     draw = ImageDraw.Draw(image)
 

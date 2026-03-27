@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     ffmpeg_bin: str = "ffmpeg"
     ffprobe_bin: str = "ffprobe"
 
+    code_snippet_font: str = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
+    code_snippet_font_size: int = 20
+
     youtube_client_secrets_file: str = "client_secrets.json"
     youtube_token_file: str = "youtube_token.json"
 

@@ -12,6 +12,7 @@ from app.schemas.video_job import (
     VideoJobCreate,
     VideoJobRead,
     VideoJobStatusResponse,
+    YouTubeUploadResponse,
 )
 from app.services.jobs.pipeline import enqueue_video_job
 
@@ -106,4 +107,44 @@ def get_video_job_status(
     return VideoJobStatusResponse(
         job=VideoJobRead.model_validate(job),
         events=[JobEventRead.model_validate(event) for event in events],
+    )
+
+
+@router.post("/{job_id}/upload", response_model=YouTubeUploadResponse)
+def upload_video_to_youtube(
+    job_id: str,
+    db: Session = Depends(get_database),
+    current_user: User = Depends(get_current_user),
+) -> YouTubeUploadResponse:
+    """Trigger an asynchronous YouTube upload for the specified video job.
+
+    The job must be in ``completed`` status (i.e. the video has been rendered)
+    before calling this endpoint.  The upload is handled by a background Celery
+    task so the response returns immediately.
+    """
+    from app.services.jobs.tasks import upload_to_youtube
+
+    job = db.scalar(
+        select(VideoJob)
+        .join(Project, Project.id == VideoJob.project_id)
+        .where(VideoJob.id == job_id, Project.user_id == current_user.id)
+    )
+    if not job:
+        raise HTTPException(status_code=404, detail="Video job not found")
+
+    if job.status != "completed":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Video job is not ready for upload (current status: {job.status}). "
+                   "Wait until the job status is 'completed'.",
+        )
+
+    if not job.render_storage_key:
+        raise HTTPException(status_code=400, detail="Rendered video file is not available yet.")
+
+    result = upload_to_youtube.delay(job_id)
+    return YouTubeUploadResponse(
+        job_id=job_id,
+        task_id=result.id,
+        message="YouTube upload has been queued. The video will be uploaded in the background.",
     )

@@ -28,6 +28,7 @@ class VideoJobRead(ORMBase):
     error_message: str | None
     render_storage_key: str | None
     metadata_json: str | None
+    youtube_video_id: str | None
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None
@@ -45,3 +46,9 @@ class JobEventRead(ORMBase):
 class VideoJobStatusResponse(BaseModel):
     job: VideoJobRead
     events: list[JobEventRead]
+
+
+class YouTubeUploadResponse(BaseModel):
+    job_id: str
+    task_id: str
+    message: str

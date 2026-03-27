@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     ffmpeg_bin: str = "ffmpeg"
     ffprobe_bin: str = "ffprobe"
 
+    youtube_client_secrets_file: str = "client_secrets.json"
+    youtube_token_file: str = "youtube_token.json"
+
     model_config = SettingsConfigDict(
         env_file=".env.example",
         env_file_encoding="utf-8",

@@ -24,6 +24,7 @@ class VideoJob(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     render_storage_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    youtube_video_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )

@@ -3,6 +3,7 @@ backend/.env
 backend/client_secrets.json
 backend/youtube_token.json
 backend/google_tts_credentials.json
+backend/gcp-service-account.json
 
 # Python
 __pycache__/

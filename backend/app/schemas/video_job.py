@@ -58,3 +58,11 @@ class VideoJobDownloadResponse(BaseModel):
     job_id: str
     storage_key: str
     download_url: str | None
+
+
+class SEOMetadataResponse(BaseModel):
+    title: str
+    description: str
+    tags: list[str]
+    hashtags: list[str]
+    category_id: int

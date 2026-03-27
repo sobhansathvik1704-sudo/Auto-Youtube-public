@@ -68,6 +68,14 @@ export interface VideoJobDownloadResponse {
   download_url: string | null;
 }
 
+export interface SEOMetadata {
+  title: string;
+  description: string;
+  tags: string[];
+  hashtags: string[];
+  category_id: number;
+}
+
 export interface AuthResponse {
   access_token: string;
   token_type: string;
@@ -121,4 +129,7 @@ export const videoJobsApi = {
     apiClient
       .get<VideoJobDownloadResponse>(`/video-jobs/${id}/download`)
       .then((r) => r.data),
+
+  getSEO: (id: string): Promise<SEOMetadata> =>
+    apiClient.get<SEOMetadata>(`/video-jobs/${id}/seo`).then((r) => r.data),
 };

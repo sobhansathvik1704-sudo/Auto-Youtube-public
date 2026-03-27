@@ -2,11 +2,13 @@ from datetime import datetime, timezone
 import json
 import logging
 from pathlib import Path
+import subprocess
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.celery_app import celery_app
+from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.db.models.asset import Asset
 from app.db.models.job_event import JobEvent
@@ -14,14 +16,44 @@ from app.db.models.project import Project
 from app.db.models.scene import Scene
 from app.db.models.script import Script
 from app.db.models.video_job import VideoJob
+from app.services.ai.tts import TTSClient
 from app.services.artifacts.local_storage import LocalArtifactStorage
 from app.services.llm.script_generator import generate_and_store_script
 from app.services.metadata.generator import build_youtube_metadata
 from app.services.renderer.ffmpeg import render_video
 from app.services.subtitles.generator import generate_srt_content
-from app.services.tts.factory import get_tts_provider
 
 logger = logging.getLogger(__name__)
+
+
+def _concatenate_audio(scene_audio_paths: list[Path], output_path: Path) -> None:
+    """Concatenate multiple MP3 clips into a single output file using FFmpeg."""
+    settings = get_settings()
+    concat_list = output_path.parent / "concat_list.txt"
+    try:
+        concat_list.write_text(
+            "\n".join(f"file '{p.resolve()}'" for p in scene_audio_paths)
+        )
+        result = subprocess.run(
+            [
+                settings.ffmpeg_bin,
+                "-y",
+                "-f", "concat",
+                "-safe", "0",
+                "-i", str(concat_list),
+                "-c", "copy",
+                str(output_path),
+            ],
+            check=False,
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.decode(errors="replace")
+            logger.error("FFmpeg audio concatenation failed: %s", stderr)
+            raise subprocess.CalledProcessError(result.returncode, result.args, result.stdout, result.stderr)
+    finally:
+        concat_list.unlink(missing_ok=True)
+
 
 VALID_STATUSES = {
     "queued",
@@ -101,18 +133,28 @@ def process_video_job(self, job_id: str) -> None:
         db.commit()
 
         set_job_status(db, job, "generating_audio")
-        tts_provider = get_tts_provider()
-        audio_output = Path(storage.job_dir(project.id, job.id)) / "audio" / "narration.mp3"
-        audio_output.parent.mkdir(parents=True, exist_ok=True)
-        tts_provider.synthesize(script.full_text, audio_output)
+        tts_client = TTSClient()
+        audio_dir = Path(storage.job_dir(project.id, job.id)) / "audio"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+        scene_audio_paths: list[Path] = []
+        for scene in scenes:
+            scene_audio_path = audio_dir / f"scene_{scene.scene_index:03d}.mp3"
+            tts_client.synthesize_speech(
+                text=scene.narration_text,
+                language=job.language_mode,
+                output_path=scene_audio_path,
+            )
+            scene_audio_paths.append(scene_audio_path)
+        audio_output = audio_dir / "narration.mp3"
+        _concatenate_audio(scene_audio_paths, audio_output)
         db.add(
             Asset(
                 video_job_id=job.id,
                 scene_id=None,
                 asset_type="audio",
-                provider="local_tts",
+                provider="google_tts",
                 storage_key=str(audio_output),
-                metadata_json=json.dumps({"voice": "local"}),
+                metadata_json=json.dumps({"voice": "google_cloud_tts", "language_mode": job.language_mode}),
             )
         )
         add_job_event(db, job.id, "tts", "completed", "Audio generated")

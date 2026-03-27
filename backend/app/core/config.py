@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     youtube_client_secrets_file: str = "client_secrets.json"
     youtube_token_file: str = "youtube_token.json"
 
+    thumbnail_provider: str = "pillow"  # "pillow" or "dalle"
     pexels_api_key: str = ""
     image_provider: str = "gradient"  # "pexels" or "gradient"
 

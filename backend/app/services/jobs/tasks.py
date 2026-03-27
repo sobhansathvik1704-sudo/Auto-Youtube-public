@@ -113,6 +113,59 @@ def upload_to_youtube(self, job_id: str) -> dict:
         )
         db.commit()
 
+        # Upload thumbnail to YouTube (non-blocking – warn and continue on failure)
+        try:
+            from sqlalchemy import select as sa_select  # noqa: PLC0415
+
+            thumbnail_asset = db.scalars(
+                sa_select(Asset)
+                .where(Asset.video_job_id == job_id, Asset.asset_type == "thumbnail")
+                .order_by(Asset.created_at.desc())
+            ).first()
+
+            if thumbnail_asset:
+                if storage.is_s3:
+                    import shutil  # noqa: PLC0415
+                    import tempfile  # noqa: PLC0415
+
+                    tmp_dir = Path(tempfile.mkdtemp(prefix="yt_thumb_"))
+                    try:
+                        tmp_thumb = tmp_dir / "thumbnail.jpg"
+                        storage.download_file(thumbnail_asset.storage_key, tmp_thumb)
+                        thumb_local = tmp_thumb
+                        if thumb_local.exists():
+                            uploader.upload_thumbnail(video_id=video_id, thumbnail_path=thumb_local)
+                            add_job_event(db, job.id, "youtube_thumbnail", "completed", "Thumbnail uploaded to YouTube")
+                            db.commit()
+                            logger.info("Thumbnail uploaded for YouTube video %s", video_id)
+                        else:
+                            logger.warning("Thumbnail file not found on disk for job %s", job_id)
+                    finally:
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
+                else:
+                    thumb_local = Path(thumbnail_asset.storage_key)
+                    if thumb_local.exists():
+                        uploader.upload_thumbnail(video_id=video_id, thumbnail_path=thumb_local)
+                        add_job_event(db, job.id, "youtube_thumbnail", "completed", "Thumbnail uploaded to YouTube")
+                        db.commit()
+                        logger.info("Thumbnail uploaded for YouTube video %s", video_id)
+                    else:
+                        logger.warning("Thumbnail file not found on disk for job %s", job_id)
+            else:
+                logger.info("No thumbnail asset found for job %s; skipping thumbnail upload", job_id)
+        except Exception as thumb_exc:
+            db.rollback()
+            logger.warning(
+                "YouTube thumbnail upload failed for job %s (non-fatal): %s",
+                job_id,
+                thumb_exc,
+            )
+            add_job_event(
+                db, job.id, "youtube_thumbnail", "failed",
+                f"Thumbnail upload failed (non-fatal): {thumb_exc}"
+            )
+            db.commit()
+
         logger.info("YouTube upload completed for job %s – video ID: %s", job_id, video_id)
         return {"youtube_video_id": video_id}
 
@@ -355,6 +408,47 @@ def process_video_job(self, job_id: str) -> None:
             db.add(render_asset)
         add_job_event(db, job.id, "render", "completed", "Video rendered successfully")
         db.commit()
+
+        # Generate thumbnail (non-blocking – pipeline completes even on failure)
+        settings = get_settings()
+        thumbnail_output = Path(storage.job_dir(project.id, job.id)) / "thumbnails" / "thumbnail.jpg"
+        try:
+            from app.services.thumbnail.generator import generate_thumbnail  # noqa: PLC0415
+
+            thumbnail_path = generate_thumbnail(
+                topic=job.topic,
+                output_path=thumbnail_output,
+                category=job.category or "default",
+                provider=settings.thumbnail_provider,
+            )
+            thumbnail_storage_key = storage.upload_file(
+                thumbnail_path, project.id, job.id, "thumbnails/thumbnail.jpg"
+            )
+            db.add(
+                Asset(
+                    video_job_id=job.id,
+                    scene_id=None,
+                    asset_type="thumbnail",
+                    provider=settings.thumbnail_provider,
+                    storage_key=thumbnail_storage_key,
+                    metadata_json=json.dumps({"provider": settings.thumbnail_provider}),
+                )
+            )
+            add_job_event(db, job.id, "thumbnail", "completed", "Thumbnail generated successfully")
+            db.commit()
+            logger.info("Thumbnail generated for job %s at %s", job_id, thumbnail_storage_key)
+        except Exception as thumb_exc:
+            db.rollback()
+            logger.warning(
+                "Thumbnail generation failed for job %s (non-fatal): %s",
+                job_id,
+                thumb_exc,
+            )
+            add_job_event(
+                db, job.id, "thumbnail", "failed",
+                f"Thumbnail generation failed (non-fatal): {thumb_exc}"
+            )
+            db.commit()
 
         set_job_status(db, job, "packaging")
         metadata_json = build_youtube_metadata(job, script, seo_metadata=seo_metadata)

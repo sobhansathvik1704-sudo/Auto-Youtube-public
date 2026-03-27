@@ -121,4 +121,7 @@ export const videoJobsApi = {
     apiClient
       .get<VideoJobDownloadResponse>(`/video-jobs/${id}/download`)
       .then((r) => r.data),
+
+  getThumbnailUrl: (id: string): string =>
+    `${BASE_URL}/video-jobs/${id}/thumbnail`,
 };

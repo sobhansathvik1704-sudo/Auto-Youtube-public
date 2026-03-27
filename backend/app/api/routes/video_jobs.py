@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_user, get_database
+from app.db.models.asset import Asset
 from app.db.models.job_event import JobEvent
 from app.db.models.project import Project
 from app.db.models.user import User
@@ -222,4 +223,53 @@ def upload_video_to_youtube(
         job_id=job_id,
         task_id=result.id,
         message="YouTube upload has been queued. The video will be uploaded in the background.",
+    )
+
+
+@router.get("/{job_id}/thumbnail")
+def get_thumbnail(
+    job_id: str,
+    db: Session = Depends(get_database),
+    current_user: User = Depends(get_current_user),
+) -> FileResponse:
+    """Serve the generated thumbnail image for the specified video job.
+
+    Returns the JPEG thumbnail file if one has been generated.  Returns 404
+    when the thumbnail has not been created yet (e.g. the job is still in
+    progress or thumbnail generation failed).
+    """
+    job = db.scalar(
+        select(VideoJob)
+        .join(Project, Project.id == VideoJob.project_id)
+        .where(VideoJob.id == job_id, Project.user_id == current_user.id)
+    )
+    if not job:
+        raise HTTPException(status_code=404, detail="Video job not found")
+
+    thumbnail_asset = db.scalars(
+        select(Asset)
+        .where(Asset.video_job_id == job_id, Asset.asset_type == "thumbnail")
+        .order_by(Asset.created_at.desc())
+    ).first()
+
+    if not thumbnail_asset:
+        raise HTTPException(status_code=404, detail="Thumbnail not yet available")
+
+    # For the local backend the storage key is an absolute path.
+    # For S3 we only support serving the local copy (which exists in the
+    # artifacts dir after the pipeline runs).
+    file_path = Path(thumbnail_asset.storage_key).resolve()
+    from app.core.config import get_settings  # noqa: PLC0415
+
+    storage_root = Path(get_settings().artifacts_dir).resolve()
+    if not str(file_path).startswith(str(storage_root)):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Thumbnail file not found on disk")
+
+    return FileResponse(
+        path=str(file_path),
+        media_type="image/jpeg",
+        filename=f"{job.topic.replace(' ', '_')}_thumbnail.jpg" if job.topic else "thumbnail.jpg",
     )

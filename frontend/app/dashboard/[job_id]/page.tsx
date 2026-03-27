@@ -209,6 +209,83 @@ function VideoPlayer({ jobId }: { jobId: string }) {
   );
 }
 
+function ThumbnailPreview({
+  jobId,
+  onError,
+}: {
+  jobId: string;
+  onError: () => void;
+}) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const objectUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+
+    async function loadThumbnail() {
+      try {
+        const token = getToken();
+        const baseUrl =
+          process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
+        const response = await fetch(
+          `${baseUrl}/video-jobs/${jobId}/thumbnail`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (!response.ok) {
+          if (!cancelled) onError();
+          return;
+        }
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        objectUrlRef.current = url;
+        if (!cancelled) setSrc(url);
+      } catch {
+        if (!cancelled) onError();
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadThumbnail();
+
+    return () => {
+      cancelled = true;
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = null;
+      }
+    };
+  }, [jobId, onError]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-32 rounded-xl bg-zinc-100 dark:bg-zinc-800">
+        <div className="flex flex-col items-center gap-2 text-zinc-500 dark:text-zinc-400">
+          <svg className="w-6 h-6 animate-spin" viewBox="0 0 24 24" fill="none">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+          </svg>
+          <span className="text-sm">Loading thumbnail…</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!src) return null;
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt="Video thumbnail"
+      className="w-full rounded-xl object-cover"
+      style={{ maxHeight: "360px" }}
+    />
+  );
+}
+
 export default function VideoJobDetailPage() {
   const router = useRouter();
   const params = useParams<{ job_id: string }>();
@@ -223,6 +300,7 @@ export default function VideoJobDetailPage() {
   const [uploadMessage, setUploadMessage] = useState("");
   const [downloadLoading, setDownloadLoading] = useState(false);
   const [downloadError, setDownloadError] = useState("");
+  const [thumbnailError, setThumbnailError] = useState(false);
 
   const fetchJob = useCallback(() => {
     if (!jobId) return;
@@ -438,6 +516,16 @@ export default function VideoJobDetailPage() {
                 {downloadError}
               </p>
             )}
+          </div>
+        )}
+
+        {/* Thumbnail preview section */}
+        {isCompleted && !thumbnailError && (
+          <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm p-6 mb-6">
+            <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50 mb-4">
+              🖼️ Thumbnail
+            </h2>
+            <ThumbnailPreview jobId={jobId} onError={() => setThumbnailError(true)} />
           </div>
         )}
 

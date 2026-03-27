@@ -262,7 +262,7 @@ def get_thumbnail(
     from app.core.config import get_settings  # noqa: PLC0415
 
     storage_root = Path(get_settings().artifacts_dir).resolve()
-    if not str(file_path).startswith(str(storage_root)):
+    if not file_path.is_relative_to(storage_root):
         raise HTTPException(status_code=403, detail="Access denied")
 
     if not file_path.exists():

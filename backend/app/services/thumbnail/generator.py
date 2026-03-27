@@ -86,11 +86,13 @@ class PillowThumbnailGenerator:
         draw = ImageDraw.Draw(img)
 
         # --- Decorative concentric rings (top-right) ---
+        # Use solid-but-muted white so the rings show on any gradient without
+        # alpha errors (the image is in RGB mode at this point).
         cx, cy = W - 140, 140
         for r in range(60, 180, 25):
             draw.ellipse(
                 [(cx - r, cy - r), (cx + r, cy + r)],
-                outline=(255, 255, 255, 40),
+                outline=(200, 200, 200),
                 width=2,
             )
 
@@ -109,8 +111,8 @@ class PillowThumbnailGenerator:
         line_h = 84
         y = H - 50 - len(lines) * line_h
         for line in lines:
-            # Drop shadow
-            draw.text((62, y + 3), line, font=title_font, fill=(0, 0, 0, 160))
+            # Drop shadow (dark grey, RGB-safe — no alpha channel in RGB mode)
+            draw.text((62, y + 3), line, font=title_font, fill=(30, 30, 30))
             draw.text((60, y), line, font=title_font, fill=(255, 255, 255))
             y += line_h
 

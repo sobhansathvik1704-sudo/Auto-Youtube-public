@@ -122,21 +122,32 @@ def upload_to_youtube(self, job_id: str) -> dict:
 
             if thumbnail_asset:
                 if storage.is_s3:
+                    import shutil  # noqa: PLC0415
                     import tempfile  # noqa: PLC0415
 
-                    tmp_thumb = Path(tempfile.mkdtemp(prefix="yt_thumb_")) / "thumbnail.jpg"
-                    storage.download_file(thumbnail_asset.storage_key, tmp_thumb)
-                    thumb_local = tmp_thumb
+                    tmp_dir = Path(tempfile.mkdtemp(prefix="yt_thumb_"))
+                    try:
+                        tmp_thumb = tmp_dir / "thumbnail.jpg"
+                        storage.download_file(thumbnail_asset.storage_key, tmp_thumb)
+                        thumb_local = tmp_thumb
+                        if thumb_local.exists():
+                            uploader.upload_thumbnail(video_id=video_id, thumbnail_path=thumb_local)
+                            add_job_event(db, job.id, "youtube_thumbnail", "completed", "Thumbnail uploaded to YouTube")
+                            db.commit()
+                            logger.info("Thumbnail uploaded for YouTube video %s", video_id)
+                        else:
+                            logger.warning("Thumbnail file not found on disk for job %s", job_id)
+                    finally:
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
                 else:
                     thumb_local = Path(thumbnail_asset.storage_key)
-
-                if thumb_local.exists():
-                    uploader.upload_thumbnail(video_id=video_id, thumbnail_path=thumb_local)
-                    add_job_event(db, job.id, "youtube_thumbnail", "completed", "Thumbnail uploaded to YouTube")
-                    db.commit()
-                    logger.info("Thumbnail uploaded for YouTube video %s", video_id)
-                else:
-                    logger.warning("Thumbnail file not found on disk for job %s", job_id)
+                    if thumb_local.exists():
+                        uploader.upload_thumbnail(video_id=video_id, thumbnail_path=thumb_local)
+                        add_job_event(db, job.id, "youtube_thumbnail", "completed", "Thumbnail uploaded to YouTube")
+                        db.commit()
+                        logger.info("Thumbnail uploaded for YouTube video %s", video_id)
+                    else:
+                        logger.warning("Thumbnail file not found on disk for job %s", job_id)
             else:
                 logger.info("No thumbnail asset found for job %s; skipping thumbnail upload", job_id)
         except Exception as thumb_exc:

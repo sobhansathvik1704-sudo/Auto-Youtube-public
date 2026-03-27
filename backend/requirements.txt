@@ -27,3 +27,8 @@ google-auth-httplib2==0.2.0
 google-auth-oauthlib==1.2.1
 boto3==1.35.0
 aiofiles==24.1.0
+slowapi==0.1.9
+pytest==8.3.4
+pytest-asyncio==0.24.0
+pytest-mock==3.14.0
+anyio[trio]==4.6.2

@@ -20,3 +20,4 @@ srt==3.5.3
 openai==1.14.2
 edge-tts==6.1.13
 mutagen==1.47.0
+google-cloud-texttospeech==2.22.0

@@ -60,6 +60,17 @@ services:
         condition: service_healthy
     command: >
       celery -A app.core.celery_app.celery_app worker --loglevel=INFO
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: youtube_ai_frontend
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000/api
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
 
 volumes:
   postgres_data:

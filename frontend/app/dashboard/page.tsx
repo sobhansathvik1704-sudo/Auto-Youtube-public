@@ -94,10 +94,20 @@ export default function DashboardPage() {
                     className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors"
                   >
                     <td className="px-6 py-4 font-mono text-xs text-zinc-500 dark:text-zinc-400 max-w-[10rem] truncate">
-                      {job.id}
+                      <Link
+                        href={`/dashboard/${job.id}`}
+                        className="hover:text-indigo-600 dark:hover:text-indigo-400"
+                      >
+                        {job.id}
+                      </Link>
                     </td>
                     <td className="px-6 py-4 text-zinc-800 dark:text-zinc-200">
-                      {job.topic}
+                      <Link
+                        href={`/dashboard/${job.id}`}
+                        className="hover:text-indigo-600 dark:hover:text-indigo-400"
+                      >
+                        {job.topic}
+                      </Link>
                     </td>
                     <td className="px-6 py-4">
                       <StatusBadge status={job.status} />

@@ -26,6 +26,76 @@ from app.services.subtitles.generator import generate_srt_content
 logger = logging.getLogger(__name__)
 
 
+@celery_app.task(name="app.services.jobs.tasks.upload_to_youtube", bind=True, max_retries=2)
+def upload_to_youtube(self, job_id: str) -> dict:
+    """Celery task: upload the rendered video for *job_id* to YouTube.
+
+    Reads the rendered ``final.mp4`` and ``youtube.json`` metadata produced
+    by the generation pipeline, then uploads the video via the YouTube Data
+    API v3 and stores the returned video ID on the :class:`VideoJob` record.
+
+    Returns a dict with ``{"youtube_video_id": "<id>"}``.
+    """
+    from app.services.youtube import YouTubeUploader
+
+    db = SessionLocal()
+    try:
+        job = db.get(VideoJob, job_id)
+        if not job:
+            logger.error("Video job %s not found", job_id)
+            raise ValueError(f"Video job {job_id} not found")
+
+        if not job.render_storage_key:
+            raise RuntimeError("Video has not been rendered yet (render_storage_key is missing)")
+
+        video_path = Path(job.render_storage_key)
+
+        # Metadata JSON is stored alongside the render under …/metadata/youtube.json
+        metadata_path = video_path.parent.parent / "metadata" / "youtube.json"
+
+        add_job_event(db, job.id, "youtube_upload", "started", "YouTube upload started")
+        db.commit()
+
+        uploader = YouTubeUploader()
+
+        metadata: dict = {}
+        if metadata_path.exists():
+            metadata = uploader.read_metadata(metadata_path)
+
+        title = metadata.get("title") or job.topic
+        description = metadata.get("description") or ""
+        tags = metadata.get("tags") or []
+
+        video_id = uploader.upload(
+            video_path=video_path,
+            title=title,
+            description=description,
+            tags=tags,
+        )
+
+        job.youtube_video_id = video_id
+        db.add(job)
+        add_job_event(
+            db, job.id, "youtube_upload", "completed",
+            f"Uploaded to YouTube: https://youtu.be/{video_id}"
+        )
+        db.commit()
+
+        logger.info("YouTube upload completed for job %s – video ID: %s", job_id, video_id)
+        return {"youtube_video_id": video_id}
+
+    except Exception as exc:
+        db.rollback()
+        job = db.get(VideoJob, job_id)
+        if job:
+            add_job_event(db, job.id, "youtube_upload", "failed", f"YouTube upload failed: {exc}")
+            db.commit()
+        logger.exception("YouTube upload failed for job %s", job_id)
+        raise self.retry(exc=exc, countdown=10)
+    finally:
+        db.close()
+
+
 def _concatenate_audio(scene_audio_paths: list[Path], output_path: Path) -> None:
     """Concatenate multiple MP3 clips into a single output file using FFmpeg."""
     settings = get_settings()

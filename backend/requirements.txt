@@ -21,3 +21,6 @@ openai==1.14.2
 edge-tts==6.1.13
 mutagen==1.47.0
 google-cloud-texttospeech==2.22.0
+google-api-python-client==2.151.0
+google-auth-httplib2==0.2.0
+google-auth-oauthlib==1.2.1

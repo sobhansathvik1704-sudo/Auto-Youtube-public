@@ -14,11 +14,13 @@ from app.db.models.asset import Asset
 from app.db.models.job_event import JobEvent
 from app.db.models.project import Project
 from app.db.models.scene import Scene
+from app.db.models.schedule import Schedule
 from app.db.models.script import Script
 from app.db.models.video_job import VideoJob
 from app.services.ai.tts import TTSClient
 from app.services.artifacts.local_storage import LocalArtifactStorage  # noqa: F401 – kept for backwards compat
 from app.services.llm.script_generator import generate_and_store_script
+from app.services.seo.generator import SEOGenerator
 from app.services.storage import StorageService
 from app.services.metadata.generator import build_youtube_metadata
 from app.services.renderer.ffmpeg import render_video
@@ -94,12 +96,14 @@ def upload_to_youtube(self, job_id: str) -> dict:
         title = metadata.get("title") or job.topic
         description = metadata.get("description") or ""
         tags = metadata.get("tags") or []
+        category_id = str(metadata.get("category_id", 28))
 
         video_id = uploader.upload(
             video_path=video_path,
             title=title,
             description=description,
             tags=tags,
+            category_id=category_id,
         )
 
         job.youtube_video_id = video_id
@@ -109,6 +113,59 @@ def upload_to_youtube(self, job_id: str) -> dict:
             f"Uploaded to YouTube: https://youtu.be/{video_id}"
         )
         db.commit()
+
+        # Upload thumbnail to YouTube (non-blocking – warn and continue on failure)
+        try:
+            from sqlalchemy import select as sa_select  # noqa: PLC0415
+
+            thumbnail_asset = db.scalars(
+                sa_select(Asset)
+                .where(Asset.video_job_id == job_id, Asset.asset_type == "thumbnail")
+                .order_by(Asset.created_at.desc())
+            ).first()
+
+            if thumbnail_asset:
+                if storage.is_s3:
+                    import shutil  # noqa: PLC0415
+                    import tempfile  # noqa: PLC0415
+
+                    tmp_dir = Path(tempfile.mkdtemp(prefix="yt_thumb_"))
+                    try:
+                        tmp_thumb = tmp_dir / "thumbnail.jpg"
+                        storage.download_file(thumbnail_asset.storage_key, tmp_thumb)
+                        thumb_local = tmp_thumb
+                        if thumb_local.exists():
+                            uploader.upload_thumbnail(video_id=video_id, thumbnail_path=thumb_local)
+                            add_job_event(db, job.id, "youtube_thumbnail", "completed", "Thumbnail uploaded to YouTube")
+                            db.commit()
+                            logger.info("Thumbnail uploaded for YouTube video %s", video_id)
+                        else:
+                            logger.warning("Thumbnail file not found on disk for job %s", job_id)
+                    finally:
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
+                else:
+                    thumb_local = Path(thumbnail_asset.storage_key)
+                    if thumb_local.exists():
+                        uploader.upload_thumbnail(video_id=video_id, thumbnail_path=thumb_local)
+                        add_job_event(db, job.id, "youtube_thumbnail", "completed", "Thumbnail uploaded to YouTube")
+                        db.commit()
+                        logger.info("Thumbnail uploaded for YouTube video %s", video_id)
+                    else:
+                        logger.warning("Thumbnail file not found on disk for job %s", job_id)
+            else:
+                logger.info("No thumbnail asset found for job %s; skipping thumbnail upload", job_id)
+        except Exception as thumb_exc:
+            db.rollback()
+            logger.warning(
+                "YouTube thumbnail upload failed for job %s (non-fatal): %s",
+                job_id,
+                thumb_exc,
+            )
+            add_job_event(
+                db, job.id, "youtube_thumbnail", "failed",
+                f"Thumbnail upload failed (non-fatal): {thumb_exc}"
+            )
+            db.commit()
 
         logger.info("YouTube upload completed for job %s – video ID: %s", job_id, video_id)
         return {"youtube_video_id": video_id}
@@ -256,6 +313,22 @@ def process_video_job(self, job_id: str) -> None:
         add_job_event(db, job.id, "script_generation", "completed", "Script generated successfully")
         db.commit()
 
+        # Generate SEO metadata immediately after script is available.
+        seo_metadata: dict | None = None
+        try:
+            seo = SEOGenerator()
+            script_summary = " ".join(
+                part for part in [script.hook, script.intro] if part
+            )
+            seo_metadata = seo.generate_seo_metadata(
+                topic=job.topic,
+                script_summary=script_summary,
+                category=job.category,
+            )
+            logger.info("SEO metadata generated for job %s", job_id)
+        except Exception as seo_exc:
+            logger.warning("SEO generation failed for job %s, using defaults: %s", job_id, seo_exc)
+
         from app.services.visuals.planner import generate_scenes_from_script
 
         set_job_status(db, job, "planning_visuals")
@@ -337,8 +410,49 @@ def process_video_job(self, job_id: str) -> None:
         add_job_event(db, job.id, "render", "completed", "Video rendered successfully")
         db.commit()
 
+        # Generate thumbnail (non-blocking – pipeline completes even on failure)
+        settings = get_settings()
+        thumbnail_output = Path(storage.job_dir(project.id, job.id)) / "thumbnails" / "thumbnail.jpg"
+        try:
+            from app.services.thumbnail.generator import generate_thumbnail  # noqa: PLC0415
+
+            thumbnail_path = generate_thumbnail(
+                topic=job.topic,
+                output_path=thumbnail_output,
+                category=job.category or "default",
+                provider=settings.thumbnail_provider,
+            )
+            thumbnail_storage_key = storage.upload_file(
+                thumbnail_path, project.id, job.id, "thumbnails/thumbnail.jpg"
+            )
+            db.add(
+                Asset(
+                    video_job_id=job.id,
+                    scene_id=None,
+                    asset_type="thumbnail",
+                    provider=settings.thumbnail_provider,
+                    storage_key=thumbnail_storage_key,
+                    metadata_json=json.dumps({"provider": settings.thumbnail_provider}),
+                )
+            )
+            add_job_event(db, job.id, "thumbnail", "completed", "Thumbnail generated successfully")
+            db.commit()
+            logger.info("Thumbnail generated for job %s at %s", job_id, thumbnail_storage_key)
+        except Exception as thumb_exc:
+            db.rollback()
+            logger.warning(
+                "Thumbnail generation failed for job %s (non-fatal): %s",
+                job_id,
+                thumb_exc,
+            )
+            add_job_event(
+                db, job.id, "thumbnail", "failed",
+                f"Thumbnail generation failed (non-fatal): {thumb_exc}"
+            )
+            db.commit()
+
         set_job_status(db, job, "packaging")
-        metadata_json = build_youtube_metadata(job, script)
+        metadata_json = build_youtube_metadata(job, script, seo_metadata=seo_metadata)
         metadata_path = storage.write_text(project.id, job.id, "metadata/youtube.json", metadata_json)
         job.metadata_json = metadata_json
         db.add(
@@ -396,5 +510,60 @@ def process_video_job(self, job_id: str) -> None:
             return  # Do not retry quota-exhausted failures
 
         raise self.retry(exc=exc, countdown=5)
+    finally:
+        db.close()
+
+
+@celery_app.task(name="app.services.jobs.tasks.check_and_run_schedules")
+def check_and_run_schedules() -> None:
+    """Runs every minute via Celery Beat. Checks for due schedules and triggers video generation."""
+    from app.services.jobs.pipeline import enqueue_video_job
+    from app.utils.cron import calculate_next_run
+
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+        due_schedules = db.scalars(
+            select(Schedule).where(
+                Schedule.is_active,
+                Schedule.next_run_at <= now,
+            )
+        ).all()
+
+        for schedule in due_schedules:
+            topics = json.loads(schedule.topics_json)
+            topic = topics[schedule.current_topic_index % len(topics)]
+
+            job = VideoJob(
+                project_id=schedule.project_id,
+                topic=topic,
+                category=schedule.category,
+                audience_level=schedule.audience_level,
+                language_mode=schedule.language_mode,
+                video_format=schedule.video_format,
+                duration_seconds=schedule.duration_seconds,
+                status="queued",
+            )
+            db.add(job)
+            db.flush()
+
+            enqueue_video_job(job.id)
+
+            schedule.last_run_at = now
+            schedule.current_topic_index = (schedule.current_topic_index + 1) % len(topics)
+            schedule.total_runs += 1
+            schedule.next_run_at = calculate_next_run(schedule.cron_expression, schedule.timezone_str)
+            logger.info(
+                "Schedule %s triggered job %s for topic %r; next run at %s",
+                schedule.id,
+                job.id,
+                topic,
+                schedule.next_run_at,
+            )
+
+        db.commit()
+    except Exception:
+        logger.exception("check_and_run_schedules failed")
+        db.rollback()
     finally:
         db.close()

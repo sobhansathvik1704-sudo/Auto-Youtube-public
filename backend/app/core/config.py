@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     did_avatar_image_url: str = "https://create-images-results.d-id.com/DefaultPresenters/Noelle_f/image.jpeg"
     did_voice_provider: str = "microsoft"  # "microsoft" or "amazon"
     did_voice_id: str = "en-US-JennyNeural"  # Microsoft Azure voice
+    thumbnail_provider: str = "pillow"  # "pillow" or "dalle"
+    pexels_api_key: str = ""
+    image_provider: str = "gradient"  # "pexels" or "gradient"
 
     model_config = SettingsConfigDict(
         env_file=".env.example",

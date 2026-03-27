@@ -79,6 +79,48 @@ def _wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[
     return lines or [""]
 
 
+_MIN_KEYWORD_LENGTH = 4  # skip words shorter than this when building a Pexels query
+_MAX_KEYWORDS = 4       # maximum number of keywords extracted per scene
+
+
+def _extract_search_query(scene: Scene) -> str:
+    """Return a short keyword query derived from the scene content."""
+    text = scene.on_screen_text or scene.narration_text or ""
+    words = text.split()
+    keywords = [w for w in words if len(w) > _MIN_KEYWORD_LENGTH][: _MAX_KEYWORDS]
+    return " ".join(keywords) if keywords else (scene.scene_type or "nature")
+
+
+def _fetch_pexels_background(scene: Scene, output_path: Path) -> Path | None:
+    """Download a Pexels stock photo for the scene if Pexels is configured.
+
+    Returns the downloaded image path, or ``None`` when Pexels is not
+    enabled, the API key is missing, or the request fails.
+    """
+    if settings.image_provider != "pexels" or not settings.pexels_api_key:
+        return None
+
+    from app.services.images.pexels import PexelsImageProvider  # noqa: PLC0415
+
+    provider = PexelsImageProvider(settings.pexels_api_key)
+    query = _extract_search_query(scene)
+    return provider.search_and_download(query, output_path)
+
+
+def _open_and_fit_image(src_path: Path, width: int, height: int) -> Image.Image:
+    """Open *src_path* and resize/crop it to fill exactly *width* × *height*."""
+    img = Image.open(src_path).convert("RGB")
+    src_w, src_h = img.size
+    scale = max(width / src_w, height / src_h)
+    new_w = int(src_w * scale)
+    new_h = int(src_h * scale)
+    img = img.resize((new_w, new_h), Image.LANCZOS)
+    left = (new_w - width) // 2
+    top = (new_h - height) // 2
+    img = img.crop((left, top, left + width, top + height))
+    return img
+
+
 def create_scene_image(
     scene: Scene,
     width: int,
@@ -108,15 +150,31 @@ def create_scene_image(
                 output_path=output_path,
             )
 
-    # --- Gradient background ---
+    # --- Background: try Pexels first, fall back to gradient ---
     scene_type_key = scene.scene_type.lower() if scene.scene_type else ""
-    color_top, color_bottom = _GRADIENT_SCHEMES.get(scene_type_key, _DEFAULT_GRADIENT)
-    image = Image.new("RGB", (width, height))
-    _draw_gradient_background(image, color_top, color_bottom)
 
-    # Overlay layer for semi-transparent elements (RGBA composite)
+    pexels_tmp = output_path.with_suffix(".pexels.jpg")
+    pexels_path = _fetch_pexels_background(scene, pexels_tmp)
+
+    if pexels_path is not None:
+        try:
+            image = _open_and_fit_image(pexels_path, width, height)
+        except Exception as exc:
+            logger.warning("Failed to open Pexels image %s: %s — using gradient", pexels_path, exc)
+            pexels_path = None
+
+    if pexels_path is None:
+        color_top, color_bottom = _GRADIENT_SCHEMES.get(scene_type_key, _DEFAULT_GRADIENT)
+        image = Image.new("RGB", (width, height))
+        _draw_gradient_background(image, color_top, color_bottom)
+
+    # Overlay layer for semi-transparent elements (RGBA composite).
+    # When using a Pexels stock photo apply a full-frame dark veil first so that
+    # text is always legible regardless of image content.
     overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     ov_draw = ImageDraw.Draw(overlay)
+    if pexels_path is not None:
+        ov_draw.rectangle([0, 0, width, height], fill=(0, 0, 0, 140))
 
     scale = height / 1080  # normalise to 1080p
     padding = int(80 * scale)

@@ -6,6 +6,7 @@ settings = get_settings()
 
 
 def get_llm_provider() -> BaseLLMProvider:
-    if settings.llm_provider == "local":
-        return LocalLLMProvider()
+    if settings.llm_provider == "openai":
+        from app.services.llm.openai_provider import OpenAILLMProvider
+        return OpenAILLMProvider()
     return LocalLLMProvider()

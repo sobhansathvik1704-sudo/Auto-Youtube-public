@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     llm_provider: str = "local"
     llm_model: str = "local-fallback"
     openai_api_key: str | None = None
+    openai_model_name: str = "gpt-4o"
 
     tts_provider: str = "local"
     tts_voice: str = "te-en-default"

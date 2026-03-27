@@ -17,8 +17,9 @@ from app.db.models.scene import Scene
 from app.db.models.script import Script
 from app.db.models.video_job import VideoJob
 from app.services.ai.tts import TTSClient
-from app.services.artifacts.local_storage import LocalArtifactStorage
+from app.services.artifacts.local_storage import LocalArtifactStorage  # noqa: F401 – kept for backwards compat
 from app.services.llm.script_generator import generate_and_store_script
+from app.services.storage import StorageService
 from app.services.metadata.generator import build_youtube_metadata
 from app.services.renderer.ffmpeg import render_video
 from app.services.subtitles.generator import generate_srt_content
@@ -39,6 +40,7 @@ def upload_to_youtube(self, job_id: str) -> dict:
     from app.services.youtube import YouTubeUploader
 
     db = SessionLocal()
+    storage = StorageService()
     try:
         job = db.get(VideoJob, job_id)
         if not job:
@@ -48,10 +50,37 @@ def upload_to_youtube(self, job_id: str) -> dict:
         if not job.render_storage_key:
             raise RuntimeError("Video has not been rendered yet (render_storage_key is missing)")
 
-        video_path = Path(job.render_storage_key)
+        # Resolve the video file to a local path (download from S3 if needed).
+        if storage.is_s3:
+            import botocore.exceptions  # noqa: PLC0415
+            import tempfile  # noqa: PLC0415
 
-        # Metadata JSON is stored alongside the render under …/metadata/youtube.json
-        metadata_path = video_path.parent.parent / "metadata" / "youtube.json"
+            tmp_dir = Path(tempfile.mkdtemp(prefix="yt_upload_"))
+            video_path = tmp_dir / "final.mp4"
+            storage.download_file(job.render_storage_key, video_path)
+
+            # Derive the S3 metadata key: replace "renders/final.mp4" with
+            # "metadata/youtube.json" within the same job prefix.
+            render_key = job.render_storage_key
+            parts = render_key.rsplit("/renders/", 1)
+            if len(parts) != 2:
+                raise RuntimeError(
+                    f"Cannot derive metadata key from render_storage_key: {render_key!r}"
+                )
+            metadata_key = parts[0] + "/metadata/youtube.json"
+            metadata_path: Path | None = tmp_dir / "youtube.json"
+            try:
+                storage.download_file(metadata_key, metadata_path)
+            except botocore.exceptions.ClientError:
+                logger.warning(
+                    "Metadata not found in S3 for job %s (key: %s); proceeding without it",
+                    job_id,
+                    metadata_key,
+                )
+                metadata_path = None
+        else:
+            video_path = Path(job.render_storage_key)
+            metadata_path = video_path.parent.parent / "metadata" / "youtube.json"
 
         add_job_event(db, job.id, "youtube_upload", "started", "YouTube upload started")
         db.commit()
@@ -59,7 +88,7 @@ def upload_to_youtube(self, job_id: str) -> dict:
         uploader = YouTubeUploader()
 
         metadata: dict = {}
-        if metadata_path.exists():
+        if metadata_path is not None and metadata_path.exists():
             metadata = uploader.read_metadata(metadata_path)
 
         title = metadata.get("title") or job.topic
@@ -163,7 +192,7 @@ def set_job_status(db: Session, job: VideoJob, status: str, error_message: str |
 @celery_app.task(name="app.services.jobs.tasks.process_video_job", bind=True, max_retries=2)
 def process_video_job(self, job_id: str) -> None:
     db = SessionLocal()
-    storage = LocalArtifactStorage()
+    storage = StorageService()
 
     try:
         job = db.get(VideoJob, job_id)
@@ -260,7 +289,19 @@ def process_video_job(self, job_id: str) -> None:
             subtitles_path=Path(srt_path),
             output_path=render_output,
         )
-        job.render_storage_key = str(render_output)
+        # Upload the rendered file to the configured storage backend and persist
+        # the storage key (S3 object key or local absolute path) on the job.
+        render_storage_key = storage.upload_file(render_output, project.id, job.id, "renders/final.mp4")
+        job.render_storage_key = render_storage_key
+        # Keep the Asset record created inside render_video in sync.
+        render_asset = db.scalars(
+            select(Asset)
+            .where(Asset.video_job_id == job.id, Asset.asset_type == "render_output")
+            .order_by(Asset.created_at.desc())
+        ).first()
+        if render_asset and render_asset.storage_key != render_storage_key:
+            render_asset.storage_key = render_storage_key
+            db.add(render_asset)
         add_job_event(db, job.id, "render", "completed", "Video rendered successfully")
         db.commit()
 

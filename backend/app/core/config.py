@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     artifacts_dir: str = "/tmp/youtube_ai_artifacts"
     storage_backend: str = "local"
 
+    aws_access_key_id: str | None = None
+    aws_secret_access_key: str | None = None
+    aws_s3_bucket_name: str | None = None
+    aws_region: str = "us-east-1"
+
     llm_provider: str = "local"
     llm_model: str = "local-fallback"
     openai_api_key: str | None = None

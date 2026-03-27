@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     youtube_client_secrets_file: str = "client_secrets.json"
     youtube_token_file: str = "youtube_token.json"
 
+    pexels_api_key: str = ""
+    image_provider: str = "gradient"  # "pexels" or "gradient"
+
     model_config = SettingsConfigDict(
         env_file=".env.example",
         env_file_encoding="utf-8",

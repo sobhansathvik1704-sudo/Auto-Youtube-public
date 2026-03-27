@@ -19,3 +19,10 @@ celery_app.conf.update(
     enable_utc=True,
     task_track_started=True,
 )
+
+celery_app.conf.beat_schedule = {
+    "check-schedules": {
+        "task": "app.services.jobs.tasks.check_and_run_schedules",
+        "schedule": 60.0,  # Every 60 seconds
+    },
+}

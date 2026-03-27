@@ -80,6 +80,49 @@ export interface Project {
   description: string;
 }
 
+export interface Schedule {
+  id: string;
+  project_id: string;
+  name: string;
+  cron_expression: string;
+  timezone_str: string;
+  topics: string[];
+  category: string;
+  audience_level: string;
+  language_mode: string;
+  video_format: string;
+  duration_seconds: number;
+  auto_upload: boolean;
+  is_active: boolean;
+  current_topic_index: number;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  total_runs: number;
+  created_at: string;
+}
+
+export interface ScheduleCreatePayload {
+  project_id: string;
+  name: string;
+  cron_expression: string;
+  timezone_str?: string;
+  topics: string[];
+  category?: string;
+  audience_level?: string;
+  language_mode?: string;
+  video_format?: string;
+  duration_seconds?: number;
+  auto_upload?: boolean;
+}
+
+export interface ScheduleUpdatePayload {
+  name?: string;
+  cron_expression?: string;
+  topics?: string[];
+  is_active?: boolean;
+  auto_upload?: boolean;
+}
+
 export const authApi = {
   login: (email: string, password: string): Promise<AuthResponse> =>
     apiClient
@@ -121,4 +164,21 @@ export const videoJobsApi = {
     apiClient
       .get<VideoJobDownloadResponse>(`/video-jobs/${id}/download`)
       .then((r) => r.data),
+};
+
+export const schedulesApi = {
+  list: (): Promise<Schedule[]> =>
+    apiClient.get<Schedule[]>("/schedules").then((r) => r.data),
+
+  create: (payload: ScheduleCreatePayload): Promise<Schedule> =>
+    apiClient.post<Schedule>("/schedules", payload).then((r) => r.data),
+
+  get: (id: string): Promise<Schedule> =>
+    apiClient.get<Schedule>(`/schedules/${id}`).then((r) => r.data),
+
+  update: (id: string, payload: ScheduleUpdatePayload): Promise<Schedule> =>
+    apiClient.put<Schedule>(`/schedules/${id}`, payload).then((r) => r.data),
+
+  delete: (id: string): Promise<void> =>
+    apiClient.delete(`/schedules/${id}`).then(() => undefined),
 };

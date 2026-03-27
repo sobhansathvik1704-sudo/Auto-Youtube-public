@@ -135,3 +135,40 @@ export const videoJobsApi = {
   getSEO: (id: string): Promise<SEOMetadata> =>
     apiClient.get<SEOMetadata>(`/video-jobs/${id}/seo`).then((r) => r.data),
 };
+
+export interface ChannelStats {
+  channel_name: string;
+  subscriber_count: number;
+  total_views: number;
+  total_videos: number;
+}
+
+export interface VideoStats {
+  video_id: string;
+  title: string;
+  published_at: string;
+  views: number;
+  likes: number;
+  comments: number;
+}
+
+export interface DailyAnalyticsRow {
+  date: string;
+  views: number;
+  estimated_minutes_watched: number;
+  subscribers_gained: number;
+  subscribers_lost: number;
+}
+
+export const analyticsApi = {
+  getChannelStats: (): Promise<ChannelStats> =>
+    apiClient.get<ChannelStats>("/analytics/channel").then((r) => r.data),
+
+  getVideoStats: (): Promise<VideoStats[]> =>
+    apiClient.get<VideoStats[]>("/analytics/videos").then((r) => r.data),
+
+  getDailyStats: (days = 30): Promise<DailyAnalyticsRow[]> =>
+    apiClient
+      .get<DailyAnalyticsRow[]>(`/analytics/daily?days=${days}`)
+      .then((r) => r.data),
+};

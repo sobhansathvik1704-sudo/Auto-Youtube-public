@@ -13,6 +13,7 @@ class VideoJobCreate(BaseModel):
     language_mode: str = Field(default="te-en", max_length=20)
     video_format: str = Field(default="short", max_length=20)
     duration_seconds: int = Field(default=60, ge=15, le=3600)
+    avatar_mode: str = Field(default="static", max_length=20)
 
 
 class VideoJobRead(ORMBase):
@@ -24,6 +25,7 @@ class VideoJobRead(ORMBase):
     language_mode: str
     video_format: str
     duration_seconds: int
+    avatar_mode: str
     status: str
     error_message: str | None
     render_storage_key: str | None

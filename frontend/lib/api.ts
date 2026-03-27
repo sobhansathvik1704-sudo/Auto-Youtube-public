@@ -37,6 +37,7 @@ export interface VideoJob {
   language_mode: string;
   video_format: string;
   duration_seconds: number;
+  avatar_mode: string;
   status: string;
   render_storage_key: string | null;
   metadata_json: string | null;
@@ -54,6 +55,7 @@ export interface VideoJobCreatePayload {
   language_mode?: string;
   video_format?: string;
   duration_seconds?: number;
+  avatar_mode?: string;
 }
 
 export interface YouTubeUploadResponse {

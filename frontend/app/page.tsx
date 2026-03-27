@@ -34,6 +34,11 @@ const LANGUAGES = [
   { value: "hi-en", label: "Hindi + English" },
 ];
 
+const AVATAR_MODES = [
+  { value: "static", label: "Static Slides (default)" },
+  { value: "did", label: "AI Avatar — D-ID (requires API key)" },
+];
+
 const inputClass =
   "rounded-lg border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-4 py-2 text-sm text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full";
 
@@ -51,6 +56,7 @@ export default function Home() {
   const [language, setLanguage] = useState("en");
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState("");
+  const [avatarMode, setAvatarMode] = useState("static");
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -96,6 +102,7 @@ export default function Home() {
         video_format: videoFormat,
         duration_seconds: duration,
         language_mode: language,
+        avatar_mode: avatarMode,
       });
       // Redirect immediately to the job detail page to see progress
       router.push(`/dashboard/${job.id}`);
@@ -234,6 +241,27 @@ export default function Home() {
                   <option key={l.value} value={l.value}>{l.label}</option>
                 ))}
               </select>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label htmlFor="avatarMode" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                🎭 Avatar Mode
+              </label>
+              <select
+                id="avatarMode"
+                value={avatarMode}
+                onChange={(e) => setAvatarMode(e.target.value)}
+                className={selectClass}
+              >
+                {AVATAR_MODES.map((m) => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </select>
+              {avatarMode === "did" && (
+                <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                  ⚠️ D-ID mode requires <code>DID_API_KEY</code> set on the server. Each scene makes one API call.
+                </p>
+              )}
             </div>
           </fieldset>
 

@@ -15,15 +15,74 @@ from app.utils.fs import ensure_dir
 
 settings = get_settings()
 
+# Gradient colour schemes per scene type: (top-left colour, bottom-right colour)
+_GRADIENT_SCHEMES: dict[str, tuple[tuple[int, int, int], tuple[int, int, int]]] = {
+    "intro": ((15, 32, 120), (100, 20, 160)),       # blue → purple
+    "outro": ((100, 20, 140), (200, 40, 100)),       # purple → pink
+    "content": ((10, 30, 80), (10, 100, 120)),       # dark blue → teal
+}
+_DEFAULT_GRADIENT = ((12, 24, 60), (20, 80, 100))
 
-def _font(size: int):
-    try:
-        return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", size=size)
-    except Exception:
-        return ImageFont.load_default()
+
+def _font(size: int, bold: bool = True):
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold
+        else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ]
+    for path in candidates:
+        try:
+            return ImageFont.truetype(path, size=size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
 
 
-def create_scene_image(scene: Scene, width: int, height: int, output_path: Path) -> Path:
+def _draw_gradient_background(image: Image.Image, color_top: tuple, color_bottom: tuple) -> None:
+    """Fill *image* with a vertical linear gradient from color_top to color_bottom."""
+    width, height = image.size
+    draw = ImageDraw.Draw(image)
+    for y in range(height):
+        t = y / max(height - 1, 1)
+        r = int(color_top[0] + (color_bottom[0] - color_top[0]) * t)
+        g = int(color_top[1] + (color_bottom[1] - color_top[1]) * t)
+        b = int(color_top[2] + (color_bottom[2] - color_top[2]) * t)
+        draw.line([(0, y), (width, y)], fill=(r, g, b))
+
+
+def _draw_rounded_rect(draw: ImageDraw.ImageDraw, bbox: tuple, radius: int, fill: tuple) -> None:
+    """Draw a filled rounded rectangle on *draw*."""
+    x0, y0, x1, y1 = bbox
+    draw.rounded_rectangle([x0, y0, x1, y1], radius=radius, fill=fill)
+
+
+def _wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[str]:
+    """Wrap *text* so that each line fits within *max_width* pixels."""
+    words = text.split()
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip() if current else word
+        bbox = font.getbbox(candidate)
+        if bbox[2] <= max_width:
+            current = candidate
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines or [""]
+
+
+def create_scene_image(
+    scene: Scene,
+    width: int,
+    height: int,
+    output_path: Path,
+    total_scenes: int = 0,
+) -> Path:
     if scene.scene_type == "code_card":
         asset_config = {}
         if scene.asset_config_json:
@@ -46,21 +105,147 @@ def create_scene_image(scene: Scene, width: int, height: int, output_path: Path)
                 output_path=output_path,
             )
 
-    # Default rendering for all non-code_card scenes (and code_card fallback)
-    image = Image.new("RGB", (width, height), color=(12, 24, 48))
-    draw = ImageDraw.Draw(image)
+    # --- Gradient background ---
+    scene_type_key = scene.scene_type.lower() if scene.scene_type else ""
+    color_top, color_bottom = _GRADIENT_SCHEMES.get(scene_type_key, _DEFAULT_GRADIENT)
+    image = Image.new("RGB", (width, height))
+    _draw_gradient_background(image, color_top, color_bottom)
 
-    title_font = _font(56 if height >= 1000 else 42)
-    body_font = _font(36 if height >= 1000 else 28)
+    # Overlay layer for semi-transparent elements (RGBA composite)
+    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    ov_draw = ImageDraw.Draw(overlay)
 
-    draw.rectangle([(0, 0), (width, 160)], fill=(0, 120, 255))
-    draw.text((60, 50), scene.scene_type.replace("_", " ").title(), fill="white", font=title_font)
+    scale = height / 1080  # normalise to 1080p
+    padding = int(80 * scale)
+    title_font_size = int(60 * scale)
+    body_font_size = int(34 * scale)
+    small_font_size = int(24 * scale)
 
-    text = scene.on_screen_text or scene.narration_text
-    draw.multiline_text((60, 260), text, fill=(255, 255, 255), font=body_font, spacing=12)
+    title_font = _font(title_font_size, bold=True)
+    body_font = _font(body_font_size, bold=False)
+    small_font = _font(small_font_size, bold=False)
+
+    scene_label = scene.scene_type.replace("_", " ").title()
+    body_text = scene.on_screen_text or scene.narration_text or ""
+
+    if scene_type_key == "intro":
+        # Centred large title layout
+        card_x0, card_y0 = int(width * 0.08), int(height * 0.2)
+        card_x1, card_y1 = int(width * 0.92), int(height * 0.8)
+        _draw_rounded_rect(ov_draw, (card_x0, card_y0, card_x1, card_y1), radius=24, fill=(0, 0, 0, 160))
+
+        # Title label
+        label_bbox = title_font.getbbox(scene_label)
+        label_w = label_bbox[2] - label_bbox[0]
+        label_x = (width - label_w) // 2
+        label_y = card_y0 + int(40 * scale)
+        ov_draw.text((label_x, label_y), scene_label, fill=(255, 220, 100, 255), font=title_font)
+
+        # Divider line
+        div_y = label_y + label_bbox[3] + int(20 * scale)
+        ov_draw.line([(card_x0 + 40, div_y), (card_x1 - 40, div_y)], fill=(255, 255, 255, 100), width=2)
+
+        # Body text centred
+        inner_w = card_x1 - card_x0 - padding * 2
+        lines = _wrap_text(body_text, body_font, inner_w)
+        total_h = len(lines) * (body_font_size + int(14 * scale))
+        text_y = div_y + int(30 * scale) + ((card_y1 - div_y - int(30 * scale)) - total_h) // 2
+        for line in lines:
+            lb = body_font.getbbox(line)
+            lx = card_x0 + (card_x1 - card_x0 - (lb[2] - lb[0])) // 2
+            ov_draw.text((lx, text_y), line, fill=(255, 255, 255, 245), font=body_font)
+            text_y += body_font_size + int(14 * scale)
+
+    elif scene_type_key == "outro":
+        # Call-to-action style layout
+        card_x0, card_y0 = int(width * 0.06), int(height * 0.15)
+        card_x1, card_y1 = int(width * 0.94), int(height * 0.85)
+        _draw_rounded_rect(ov_draw, (card_x0, card_y0, card_x1, card_y1), radius=24, fill=(0, 0, 0, 150))
+
+        # Accent bar at top of card
+        ov_draw.rounded_rectangle([card_x0, card_y0, card_x1, card_y0 + int(8 * scale)],
+                                   radius=4, fill=(255, 80, 150, 220))
+
+        label_bbox = title_font.getbbox(scene_label)
+        label_w = label_bbox[2] - label_bbox[0]
+        label_x = (width - label_w) // 2
+        label_y = card_y0 + int(50 * scale)
+        ov_draw.text((label_x, label_y), scene_label, fill=(255, 160, 200, 255), font=title_font)
+
+        inner_w = card_x1 - card_x0 - padding * 2
+        lines = _wrap_text(body_text, body_font, inner_w)
+        text_y = label_y + label_bbox[3] + int(40 * scale)
+        for line in lines:
+            lb = body_font.getbbox(line)
+            lx = card_x0 + (card_x1 - card_x0 - (lb[2] - lb[0])) // 2
+            ov_draw.text((lx, text_y), line, fill=(255, 255, 255, 245), font=body_font)
+            text_y += body_font_size + int(14 * scale)
+
+    else:
+        # Card-based layout for content scenes
+        card_x0, card_y0 = int(width * 0.05), int(height * 0.1)
+        card_x1, card_y1 = int(width * 0.95), int(height * 0.9)
+        _draw_rounded_rect(ov_draw, (card_x0, card_y0, card_x1, card_y1), radius=20, fill=(0, 0, 0, 140))
+
+        # Header strip
+        header_y1 = card_y0 + int(90 * scale)
+        _draw_rounded_rect(ov_draw, (card_x0, card_y0, card_x1, header_y1), radius=20, fill=(0, 100, 200, 180))
+
+        label_bbox = title_font.getbbox(scene_label)
+        label_y = card_y0 + (int(90 * scale) - (label_bbox[3] - label_bbox[1])) // 2
+        ov_draw.text((card_x0 + padding, label_y), scene_label, fill=(255, 255, 255, 255), font=title_font)
+
+        # Body text left-aligned
+        inner_w = card_x1 - card_x0 - padding * 2
+        lines = _wrap_text(body_text, body_font, inner_w)
+        text_y = header_y1 + int(40 * scale)
+        for line in lines:
+            ov_draw.text((card_x0 + padding, text_y), line, fill=(220, 235, 255, 245), font=body_font)
+            text_y += body_font_size + int(14 * scale)
+
+        # Subtle border around card
+        ov_draw.rounded_rectangle([card_x0, card_y0, card_x1, card_y1],
+                                   radius=20, outline=(255, 255, 255, 50), width=2)
+
+    # --- Scene number indicator (top-right corner) ---
+    if total_scenes > 0:
+        indicator = f"{scene.scene_index + 1}/{total_scenes}"
+    else:
+        indicator = str(scene.scene_index + 1)
+    ind_bbox = small_font.getbbox(indicator)
+    ind_w = ind_bbox[2] - ind_bbox[0]
+    ind_h = ind_bbox[3] - ind_bbox[1]
+    ind_pad = int(12 * scale)
+    ind_x = width - ind_w - ind_pad * 3
+    ind_y = ind_pad * 2
+    _draw_rounded_rect(ov_draw, (ind_x - ind_pad, ind_y - ind_pad // 2,
+                                  ind_x + ind_w + ind_pad, ind_y + ind_h + ind_pad // 2),
+                       radius=8, fill=(0, 0, 0, 140))
+    ov_draw.text((ind_x, ind_y), indicator, fill=(200, 220, 255, 220), font=small_font)
+
+    # Composite overlay onto background
+    image = image.convert("RGBA")
+    image = Image.alpha_composite(image, overlay)
+    image = image.convert("RGB")
 
     image.save(output_path)
     return output_path
+
+
+def _build_fade_filter(scenes: list[Scene]) -> str:
+    """Build a vf filter string that adds 0.3s fade-out at scene end and fade-in at scene start."""
+    fade_duration = 0.3
+    parts: list[str] = []
+    offset = 0.0
+    for scene in scenes:
+        duration = scene.duration_ms / 1000.0
+        parts.append(f"fade=t=in:st={offset:.3f}:d={fade_duration}")
+        # fade-out near end of this scene
+        fade_out_start = offset + duration - fade_duration
+        if fade_out_start > offset:
+            parts.append(f"fade=t=out:st={fade_out_start:.3f}:d={fade_duration}")
+        offset += duration
+    return ",".join(parts)
 
 
 def render_video(
@@ -74,13 +259,14 @@ def render_video(
     width, height = resolve_dimensions(job)
     scene_dir = ensure_dir(output_path.parent / "scene_frames")
 
+    total_scenes = len(scenes)
     concat_file = output_path.parent / "concat.txt"
     image_paths: list[Path] = []
 
     with concat_file.open("w", encoding="utf-8") as handle:
         for scene in scenes:
             scene_image = scene_dir / f"{scene.scene_index:03d}.png"
-            create_scene_image(scene, width, height, scene_image)
+            create_scene_image(scene, width, height, scene_image, total_scenes=total_scenes)
             image_paths.append(scene_image)
 
             handle.write(f"file '{scene_image.as_posix()}'\n")
@@ -91,7 +277,18 @@ def render_video(
         handle.write(f"file '{image_paths[-1].as_posix()}'\n")
         handle.close()
 
-    subtitle_filter = f"subtitles={subtitles_path.as_posix()}"
+    # Build subtitle filter with ASS-style force_style for better appearance
+    subtitle_filter = (
+        f"subtitles={subtitles_path.as_posix()}"
+        ":force_style='FontName=DejaVu Sans,FontSize=22,"
+        "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
+        "Outline=2,Shadow=1,BackColour=&H80000000,"
+        "BorderStyle=4,MarginV=30'"
+    )
+
+    # Add per-scene fade-in/fade-out transitions
+    fade_filter = _build_fade_filter(scenes)
+    vf_filter = f"{fade_filter},{subtitle_filter}" if fade_filter else subtitle_filter
 
     cmd = [
         settings.ffmpeg_bin,
@@ -105,7 +302,7 @@ def render_video(
         "-i",
         str(audio_path),
         "-vf",
-        subtitle_filter,
+        vf_filter,
         "-r",
         str(settings.video_render_fps),
         "-pix_fmt",

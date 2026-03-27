@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { videoJobsApi, VideoJob, VideoJobDownloadResponse } from "@/lib/api";
+import { isAuthenticated, removeToken } from "@/lib/auth";
 
 const STATUS_COLORS: Record<string, string> = {
   queued: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300",
@@ -32,6 +33,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function VideoJobDetailPage() {
+  const router = useRouter();
   const params = useParams<{ job_id: string }>();
   const jobId = params.job_id;
 
@@ -56,8 +58,17 @@ export default function VideoJobDetailPage() {
   }, [jobId]);
 
   useEffect(() => {
+    if (!isAuthenticated()) {
+      router.replace("/login");
+      return;
+    }
     fetchJob();
-  }, [fetchJob]);
+  }, [fetchJob, router]);
+
+  function handleLogout() {
+    removeToken();
+    router.replace("/login");
+  }
 
   async function handleDownload() {
     if (!jobId) return;
@@ -128,12 +139,20 @@ export default function VideoJobDetailPage() {
     <main className="min-h-screen bg-zinc-50 dark:bg-zinc-950 px-4 py-12">
       <div className="mx-auto max-w-3xl">
         {/* Back link */}
-        <Link
-          href="/dashboard"
-          className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline mb-6 inline-block"
-        >
-          ← Back to dashboard
-        </Link>
+        <div className="flex items-center justify-between mb-6">
+          <Link
+            href="/dashboard"
+            className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline"
+          >
+            ← Back to dashboard
+          </Link>
+          <button
+            onClick={handleLogout}
+            className="text-sm text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
+          >
+            Sign out
+          </button>
+        </div>
 
         {/* Header */}
         <div className="flex items-start justify-between mb-6">

@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { videoJobsApi, VideoJob } from "@/lib/api";
+import { isAuthenticated, removeToken } from "@/lib/auth";
 
 const STATUS_COLORS: Record<string, string> = {
   queued: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300",
@@ -21,17 +23,27 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function DashboardPage() {
+  const router = useRouter();
   const [jobs, setJobs] = useState<VideoJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
+    if (!isAuthenticated()) {
+      router.replace("/login");
+      return;
+    }
     videoJobsApi
       .list()
       .then(setJobs)
       .catch(() => setError("Could not load jobs. Make sure the backend is running."))
       .finally(() => setLoading(false));
-  }, []);
+  }, [router]);
+
+  function handleLogout() {
+    removeToken();
+    router.replace("/login");
+  }
 
   return (
     <main className="min-h-screen bg-zinc-50 dark:bg-zinc-950 px-4 py-12">
@@ -40,12 +52,20 @@ export default function DashboardPage() {
           <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50">
             📋 Video Jobs
           </h1>
-          <Link
-            href="/"
-            className="rounded-lg bg-indigo-600 hover:bg-indigo-700 px-4 py-2 text-sm font-semibold text-white transition-colors"
-          >
-            + New Job
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/"
+              className="rounded-lg bg-indigo-600 hover:bg-indigo-700 px-4 py-2 text-sm font-semibold text-white transition-colors"
+            >
+              + New Job
+            </Link>
+            <button
+              onClick={handleLogout}
+              className="text-sm text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
+            >
+              Sign out
+            </button>
+          </div>
         </div>
 
         {loading && (

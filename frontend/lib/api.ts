@@ -1,4 +1,5 @@
 import axios from "axios";
+import { getToken, removeToken } from "@/lib/auth";
 
 const BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
@@ -7,6 +8,25 @@ const apiClient = axios.create({
   baseURL: BASE_URL,
   headers: { "Content-Type": "application/json" },
 });
+
+apiClient.interceptors.request.use((config) => {
+  const token = getToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401 && typeof window !== "undefined") {
+      removeToken();
+      window.location.href = "/login";
+    }
+    return Promise.reject(error);
+  }
+);
 
 export interface VideoJob {
   id: string;
@@ -47,6 +67,40 @@ export interface VideoJobDownloadResponse {
   storage_key: string;
   download_url: string | null;
 }
+
+export interface AuthResponse {
+  access_token: string;
+  token_type: string;
+  user: { id: string; email: string };
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export const authApi = {
+  login: (email: string, password: string): Promise<AuthResponse> =>
+    apiClient
+      .post<AuthResponse>("/auth/login", { email, password })
+      .then((r) => r.data),
+
+  register: (email: string, password: string): Promise<AuthResponse> =>
+    apiClient
+      .post<AuthResponse>("/auth/register", { email, password })
+      .then((r) => r.data),
+};
+
+export const projectsApi = {
+  list: (): Promise<Project[]> =>
+    apiClient.get<Project[]>("/projects").then((r) => r.data),
+
+  create: (name: string, description: string): Promise<Project> =>
+    apiClient
+      .post<Project>("/projects", { name, description })
+      .then((r) => r.data),
+};
 
 export const videoJobsApi = {
   list: (): Promise<VideoJob[]> =>

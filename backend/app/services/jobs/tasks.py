@@ -19,6 +19,7 @@ from app.db.models.video_job import VideoJob
 from app.services.ai.tts import TTSClient
 from app.services.artifacts.local_storage import LocalArtifactStorage  # noqa: F401 – kept for backwards compat
 from app.services.llm.script_generator import generate_and_store_script
+from app.services.seo.generator import SEOGenerator
 from app.services.storage import StorageService
 from app.services.metadata.generator import build_youtube_metadata
 from app.services.renderer.ffmpeg import render_video
@@ -94,12 +95,14 @@ def upload_to_youtube(self, job_id: str) -> dict:
         title = metadata.get("title") or job.topic
         description = metadata.get("description") or ""
         tags = metadata.get("tags") or []
+        category_id = str(metadata.get("category_id", 28))
 
         video_id = uploader.upload(
             video_path=video_path,
             title=title,
             description=description,
             tags=tags,
+            category_id=category_id,
         )
 
         job.youtube_video_id = video_id
@@ -256,6 +259,22 @@ def process_video_job(self, job_id: str) -> None:
         add_job_event(db, job.id, "script_generation", "completed", "Script generated successfully")
         db.commit()
 
+        # Generate SEO metadata immediately after script is available.
+        seo_metadata: dict | None = None
+        try:
+            seo = SEOGenerator()
+            script_summary = " ".join(
+                part for part in [script.hook, script.intro] if part
+            )
+            seo_metadata = seo.generate_seo_metadata(
+                topic=job.topic,
+                script_summary=script_summary,
+                category=job.category,
+            )
+            logger.info("SEO metadata generated for job %s", job_id)
+        except Exception as seo_exc:
+            logger.warning("SEO generation failed for job %s, using defaults: %s", job_id, seo_exc)
+
         from app.services.visuals.planner import generate_scenes_from_script
 
         set_job_status(db, job, "planning_visuals")
@@ -338,7 +357,7 @@ def process_video_job(self, job_id: str) -> None:
         db.commit()
 
         set_job_status(db, job, "packaging")
-        metadata_json = build_youtube_metadata(job, script)
+        metadata_json = build_youtube_metadata(job, script, seo_metadata=seo_metadata)
         metadata_path = storage.write_text(project.id, job.id, "metadata/youtube.json", metadata_json)
         job.metadata_json = metadata_json
         db.add(

@@ -7,6 +7,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
+from app.api.routes.analytics import router as analytics_router
 from app.api.routes.artifacts import router as artifacts_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.projects import router as projects_router
@@ -47,6 +48,7 @@ app.include_router(video_jobs_router, prefix=settings.api_v1_prefix)
 app.include_router(scripts_router, prefix=settings.api_v1_prefix)
 app.include_router(artifacts_router, prefix=settings.api_v1_prefix)
 app.include_router(schedules_router, prefix=settings.api_v1_prefix)
+app.include_router(analytics_router, prefix=settings.api_v1_prefix)
 
 
 @app.get("/health", response_model=HealthResponse)

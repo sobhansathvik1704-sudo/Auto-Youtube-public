@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_user, get_database
+from app.db.models.asset import Asset
 from app.db.models.job_event import JobEvent
 from app.db.models.project import Project
 from app.db.models.user import User
@@ -17,6 +18,7 @@ from app.schemas.video_job import (
     VideoJobRead,
     VideoJobStatusResponse,
     YouTubeUploadResponse,
+    SEOMetadataResponse,
 )
 from app.services.jobs.pipeline import enqueue_video_job
 
@@ -185,6 +187,48 @@ def download_video_file(
     )
 
 
+@router.get("/{job_id}/seo", response_model=SEOMetadataResponse)
+def get_video_job_seo(
+    job_id: str,
+    db: Session = Depends(get_database),
+    current_user: User = Depends(get_current_user),
+) -> SEOMetadataResponse:
+    """Return the SEO metadata generated for a completed video job.
+
+    The metadata is parsed from the ``metadata_json`` field stored on the job
+    record during the generation pipeline.  If the job is not yet complete or
+    has no metadata, a 404 is returned.
+    """
+    import json as _json  # noqa: PLC0415
+
+    job = db.scalar(
+        select(VideoJob)
+        .join(Project, Project.id == VideoJob.project_id)
+        .where(VideoJob.id == job_id, Project.user_id == current_user.id)
+    )
+    if not job:
+        raise HTTPException(status_code=404, detail="Video job not found")
+
+    if not job.metadata_json:
+        raise HTTPException(
+            status_code=404,
+            detail="SEO metadata is not available yet. Wait until the job status is 'completed'.",
+        )
+
+    try:
+        data = _json.loads(job.metadata_json)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=500, detail="Failed to parse SEO metadata") from exc
+
+    return SEOMetadataResponse(
+        title=data.get("title", job.topic),
+        description=data.get("description", ""),
+        tags=data.get("tags", []),
+        hashtags=data.get("hashtags", []),
+        category_id=int(data.get("category_id", 28)),
+    )
+
+
 @router.post("/{job_id}/upload", response_model=YouTubeUploadResponse)
 def upload_video_to_youtube(
     job_id: str,
@@ -222,4 +266,53 @@ def upload_video_to_youtube(
         job_id=job_id,
         task_id=result.id,
         message="YouTube upload has been queued. The video will be uploaded in the background.",
+    )
+
+
+@router.get("/{job_id}/thumbnail")
+def get_thumbnail(
+    job_id: str,
+    db: Session = Depends(get_database),
+    current_user: User = Depends(get_current_user),
+) -> FileResponse:
+    """Serve the generated thumbnail image for the specified video job.
+
+    Returns the JPEG thumbnail file if one has been generated.  Returns 404
+    when the thumbnail has not been created yet (e.g. the job is still in
+    progress or thumbnail generation failed).
+    """
+    job = db.scalar(
+        select(VideoJob)
+        .join(Project, Project.id == VideoJob.project_id)
+        .where(VideoJob.id == job_id, Project.user_id == current_user.id)
+    )
+    if not job:
+        raise HTTPException(status_code=404, detail="Video job not found")
+
+    thumbnail_asset = db.scalars(
+        select(Asset)
+        .where(Asset.video_job_id == job_id, Asset.asset_type == "thumbnail")
+        .order_by(Asset.created_at.desc())
+    ).first()
+
+    if not thumbnail_asset:
+        raise HTTPException(status_code=404, detail="Thumbnail not yet available")
+
+    # For the local backend the storage key is an absolute path.
+    # For S3 we only support serving the local copy (which exists in the
+    # artifacts dir after the pipeline runs).
+    file_path = Path(thumbnail_asset.storage_key).resolve()
+    from app.core.config import get_settings  # noqa: PLC0415
+
+    storage_root = Path(get_settings().artifacts_dir).resolve()
+    if not file_path.is_relative_to(storage_root):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Thumbnail file not found on disk")
+
+    return FileResponse(
+        path=str(file_path),
+        media_type="image/jpeg",
+        filename=f"{job.topic.replace(' ', '_')}_thumbnail.jpg" if job.topic else "thumbnail.jpg",
     )

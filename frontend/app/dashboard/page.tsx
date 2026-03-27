@@ -121,6 +121,12 @@ export default function DashboardPage() {
           </h1>
           <div className="flex items-center gap-3">
             <Link
+              href="/analytics"
+              className="rounded-lg border border-zinc-200 dark:border-zinc-700 px-4 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            >
+              📊 Analytics
+            </Link>
+            <Link
               href="/"
               className="rounded-lg bg-indigo-600 hover:bg-indigo-700 px-4 py-2 text-sm font-semibold text-white transition-colors"
             >

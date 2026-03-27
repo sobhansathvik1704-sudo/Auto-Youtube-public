@@ -166,3 +166,32 @@ class YouTubeUploader:
         """Parse the youtube.json metadata file produced by the pipeline."""
         with metadata_path.open() as fh:
             return json.load(fh)
+
+    def upload_thumbnail(self, video_id: str, thumbnail_path: Path) -> None:
+        """Upload a custom thumbnail for *video_id*.
+
+        Requires the YouTube channel to be verified.  If the channel is not
+        verified the API returns a 403 error which is caught and logged as a
+        warning so the calling code can continue gracefully.
+
+        Args:
+            video_id: The YouTube video ID returned by :meth:`upload`.
+            thumbnail_path: Absolute path to the JPEG thumbnail file.
+        """
+        from googleapiclient.http import MediaFileUpload  # noqa: PLC0415
+
+        if not thumbnail_path.exists():
+            logger.warning("Thumbnail file not found: %s", thumbnail_path)
+            return
+
+        youtube = self._build_client()
+        media = MediaFileUpload(str(thumbnail_path), mimetype="image/jpeg")
+        try:
+            youtube.thumbnails().set(videoId=video_id, media_body=media).execute()
+            logger.info("Thumbnail uploaded for YouTube video %s", video_id)
+        except Exception as exc:
+            # Re-raise so the caller can decide how to handle it.
+            # Callers should catch this and log a warning rather than failing.
+            raise RuntimeError(
+                f"YouTube thumbnail upload failed for video {video_id}: {exc}"
+            ) from exc

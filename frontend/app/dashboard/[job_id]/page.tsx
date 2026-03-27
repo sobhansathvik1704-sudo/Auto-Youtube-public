@@ -3,8 +3,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { videoJobsApi, VideoJob, VideoJobDownloadResponse } from "@/lib/api";
-import { isAuthenticated, removeToken } from "@/lib/auth";
+import { videoJobsApi, VideoJob } from "@/lib/api";
+import { isAuthenticated, removeToken, getToken } from "@/lib/auth";
 
 const STATUS_COLORS: Record<string, string> = {
   queued: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300",
@@ -44,7 +44,6 @@ export default function VideoJobDetailPage() {
     "idle" | "loading" | "success" | "error"
   >("idle");
   const [uploadMessage, setUploadMessage] = useState("");
-  const [downloadInfo, setDownloadInfo] = useState<VideoJobDownloadResponse | null>(null);
   const [downloadLoading, setDownloadLoading] = useState(false);
   const [downloadError, setDownloadError] = useState("");
 
@@ -77,9 +76,27 @@ export default function VideoJobDetailPage() {
     try {
       const info = await videoJobsApi.getDownloadUrl(jobId);
       if (info.download_url) {
+        // S3 presigned URL
         window.open(info.download_url, "_blank", "noopener,noreferrer");
       } else {
-        setDownloadInfo(info);
+        // Local storage — use the file serving endpoint
+        const token = getToken();
+        const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
+        const response = await fetch(`${baseUrl}/video-jobs/${jobId}/download/file`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!response.ok) throw new Error("Download failed");
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        const disposition = response.headers.get("Content-Disposition");
+        const match = disposition?.match(/filename="?([^"]+)"?/);
+        a.download = match?.[1] ?? `video_${jobId}.mp4`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        a.remove();
       }
     } catch (err: unknown) {
       const message =
@@ -223,11 +240,6 @@ export default function VideoJobDetailPage() {
             >
               {downloadLoading ? "Fetching link…" : "Download Video"}
             </button>
-            {downloadInfo && !downloadInfo.download_url && (
-              <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400 font-mono break-all">
-                {downloadInfo.storage_key}
-              </p>
-            )}
             {downloadError && (
               <p className="mt-3 text-sm rounded-lg px-3 py-2 bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-400">
                 {downloadError}

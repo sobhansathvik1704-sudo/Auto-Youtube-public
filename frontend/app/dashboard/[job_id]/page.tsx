@@ -1,14 +1,101 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { videoJobsApi, VideoJob } from "@/lib/api";
 import { isAuthenticated, removeToken, getToken } from "@/lib/auth";
 
+const PIPELINE_STEPS = [
+  { key: "queued", label: "Queued" },
+  { key: "generating_script", label: "Script" },
+  { key: "generating_audio", label: "Audio" },
+  { key: "generating_subtitles", label: "Subtitles" },
+  { key: "rendering", label: "Rendering" },
+  { key: "packaging", label: "Packaging" },
+  { key: "completed", label: "Completed" },
+];
+
+function getStepIndex(status: string): number {
+  const idx = PIPELINE_STEPS.findIndex((s) => s.key === status);
+  return idx === -1 ? 0 : idx;
+}
+
+function ProgressStepper({ status }: { status: string }) {
+  const isFailed = status === "failed";
+  const currentIdx = isFailed ? -1 : getStepIndex(status);
+  const isCompleted = status === "completed";
+
+  return (
+    <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm p-6 mb-6">
+      <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50 mb-5">
+        Pipeline Progress
+      </h2>
+      {isFailed ? (
+        <div className="flex items-center gap-3 text-red-600 dark:text-red-400">
+          <span className="flex items-center justify-center w-8 h-8 rounded-full bg-red-100 dark:bg-red-900/40 text-lg font-bold">✕</span>
+          <span className="font-medium">Job failed — check logs for details.</span>
+        </div>
+      ) : (
+        <div className="flex items-center gap-1 overflow-x-auto pb-1">
+          {PIPELINE_STEPS.map((step, idx) => {
+            const isDone = idx < currentIdx || isCompleted;
+            const isCurrent = !isCompleted && idx === currentIdx;
+            return (
+              <div key={step.key} className="flex items-center min-w-0">
+                {/* Step circle */}
+                <div className="flex flex-col items-center gap-1.5">
+                  <div
+                    className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-semibold transition-all ${
+                      isDone
+                        ? "bg-green-500 text-white"
+                        : isCurrent
+                        ? "bg-indigo-600 text-white ring-2 ring-indigo-300 dark:ring-indigo-700 animate-pulse"
+                        : "bg-zinc-200 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400"
+                    }`}
+                  >
+                    {isDone ? "✓" : idx + 1}
+                  </div>
+                  <span
+                    className={`text-xs whitespace-nowrap ${
+                      isDone
+                        ? "text-green-600 dark:text-green-400 font-medium"
+                        : isCurrent
+                        ? "text-indigo-600 dark:text-indigo-400 font-semibold"
+                        : "text-zinc-400 dark:text-zinc-500"
+                    }`}
+                  >
+                    {step.label}
+                  </span>
+                </div>
+                {/* Connector line */}
+                {idx < PIPELINE_STEPS.length - 1 && (
+                  <div
+                    className={`h-0.5 w-6 sm:w-10 flex-shrink-0 mx-1 rounded ${
+                      idx < currentIdx || isCompleted
+                        ? "bg-green-500"
+                        : "bg-zinc-200 dark:bg-zinc-700"
+                    }`}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {isCompleted && (
+        <p className="mt-4 text-sm text-green-600 dark:text-green-400 font-medium flex items-center gap-2">
+          <span className="text-lg">🎉</span> Your video is ready!
+        </p>
+      )}
+    </div>
+  );
+}
+
 const STATUS_COLORS: Record<string, string> = {
   queued: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300",
   researching: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
+  generating_script: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
   script_generated: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
   planning_visuals: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
   generating_audio: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
@@ -32,6 +119,96 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+function VideoPlayer({ jobId }: { jobId: string }) {
+  const [videoSrc, setVideoSrc] = useState<string | null>(null);
+  const [videoLoading, setVideoLoading] = useState(true);
+  const [videoError, setVideoError] = useState("");
+  const objectUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setVideoLoading(true);
+    setVideoError("");
+
+    async function loadVideo() {
+      try {
+        const token = getToken();
+        const baseUrl =
+          process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
+
+        // First try the S3 presigned URL, fall back to local file serving
+        let url: string | null = null;
+        try {
+          const info = await videoJobsApi.getDownloadUrl(jobId);
+          if (info.download_url) {
+            url = info.download_url;
+          }
+        } catch {
+          // fall through to local endpoint
+        }
+
+        if (!url) {
+          const response = await fetch(
+            `${baseUrl}/video-jobs/${jobId}/download/file`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          if (!response.ok) throw new Error("Could not load video");
+          const blob = await response.blob();
+          // Create a blob object URL and track it for cleanup on unmount.
+          // S3 presigned URLs are plain https:// links and don't need revocation.
+          url = URL.createObjectURL(blob);
+          objectUrlRef.current = url;
+        }
+
+        if (!cancelled) setVideoSrc(url);
+      } catch {
+        if (!cancelled) setVideoError("Could not load video preview.");
+      } finally {
+        if (!cancelled) setVideoLoading(false);
+      }
+    }
+
+    loadVideo();
+
+    return () => {
+      cancelled = true;
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = null;
+      }
+    };
+  }, [jobId]);
+
+  if (videoLoading) {
+    return (
+      <div className="flex items-center justify-center h-48 rounded-xl bg-zinc-100 dark:bg-zinc-800">
+        <div className="flex flex-col items-center gap-2 text-zinc-500 dark:text-zinc-400">
+          <svg className="w-8 h-8 animate-spin" viewBox="0 0 24 24" fill="none">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+          </svg>
+          <span className="text-sm">Loading video…</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (videoError || !videoSrc) {
+    return (
+      <p className="text-sm text-red-600 dark:text-red-400">{videoError || "Video unavailable."}</p>
+    );
+  }
+
+  return (
+    <video
+      src={videoSrc}
+      controls
+      className="w-full rounded-xl bg-black"
+      style={{ maxHeight: "480px" }}
+    />
+  );
+}
+
 export default function VideoJobDetailPage() {
   const router = useRouter();
   const params = useParams<{ job_id: string }>();
@@ -51,9 +228,14 @@ export default function VideoJobDetailPage() {
     if (!jobId) return;
     videoJobsApi
       .get(jobId)
-      .then(setJob)
-      .catch(() => setError("Could not load job details."))
-      .finally(() => setLoading(false));
+      .then((data) => {
+        setJob(data);
+        setLoading(false);
+      })
+      .catch(() => {
+        setError("Could not load job details.");
+        setLoading(false);
+      });
   }, [jobId]);
 
   useEffect(() => {
@@ -63,6 +245,14 @@ export default function VideoJobDetailPage() {
     }
     fetchJob();
   }, [fetchJob, router]);
+
+  // Auto-refresh every 3 seconds while job is still in progress
+  useEffect(() => {
+    if (!job) return;
+    if (job.status === "completed" || job.status === "failed") return;
+    const timer = setInterval(fetchJob, 3000);
+    return () => clearInterval(timer);
+  }, [job, fetchJob]);
 
   function handleLogout() {
     removeToken();
@@ -184,6 +374,9 @@ export default function VideoJobDetailPage() {
           <StatusBadge status={job.status} />
         </div>
 
+        {/* Progress stepper */}
+        <ProgressStepper status={job.status} />
+
         {/* Details card */}
         <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm p-6 mb-6">
           <dl className="grid grid-cols-2 gap-4 text-sm">
@@ -224,22 +417,22 @@ export default function VideoJobDetailPage() {
           </dl>
         </div>
 
-        {/* Download section */}
+        {/* Video preview + download section */}
         {isCompleted && (
           <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm p-6 mb-6">
             <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50 mb-4">
-              ⬇ Download Video
+              🎬 Video Preview
             </h2>
-            <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4">
-              Download your rendered video file directly.
-            </p>
-            <button
-              onClick={handleDownload}
-              disabled={downloadLoading}
-              className="rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 text-sm font-semibold text-white transition-colors"
-            >
-              {downloadLoading ? "Fetching link…" : "Download Video"}
-            </button>
+            <VideoPlayer jobId={jobId} />
+            <div className="mt-4 flex items-center gap-3">
+              <button
+                onClick={handleDownload}
+                disabled={downloadLoading}
+                className="rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 text-sm font-semibold text-white transition-colors"
+              >
+                {downloadLoading ? "Fetching link…" : "⬇ Download Video"}
+              </button>
+            </div>
             {downloadError && (
               <p className="mt-3 text-sm rounded-lg px-3 py-2 bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-400">
                 {downloadError}

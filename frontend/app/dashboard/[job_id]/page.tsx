@@ -154,6 +154,8 @@ function VideoPlayer({ jobId }: { jobId: string }) {
           );
           if (!response.ok) throw new Error("Could not load video");
           const blob = await response.blob();
+          // Create a blob object URL and track it for cleanup on unmount.
+          // S3 presigned URLs are plain https:// links and don't need revocation.
           url = URL.createObjectURL(blob);
           objectUrlRef.current = url;
         }

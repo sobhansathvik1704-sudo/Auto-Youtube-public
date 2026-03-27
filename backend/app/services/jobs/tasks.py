@@ -116,10 +116,42 @@ def upload_to_youtube(self, job_id: str) -> dict:
     except Exception as exc:
         db.rollback()
         job = db.get(VideoJob, job_id)
+
+        # Determine whether we should retry or fail immediately.
+        should_retry = True
+        error_msg = str(exc)
+
+        try:
+            from googleapiclient.errors import HttpError  # noqa: PLC0415
+            if isinstance(exc, HttpError):
+                status_code = exc.resp.status
+                if status_code == 401:
+                    should_retry = False
+                    error_msg = (
+                        "YouTube authentication failed (401). "
+                        "Please re-authenticate and refresh youtube_token.json."
+                    )
+                elif status_code == 403:
+                    should_retry = False
+                    error_msg = (
+                        "YouTube API quota exceeded or access forbidden (403). "
+                        "Check your API quota in Google Cloud Console."
+                    )
+                # 5xx errors: retry as usual (should_retry stays True)
+        except ImportError:
+            pass
+
         if job:
-            add_job_event(db, job.id, "youtube_upload", "failed", f"YouTube upload failed: {exc}")
+            if not should_retry:
+                set_job_status(db, job, "failed", error_message=error_msg)
+            add_job_event(db, job.id, "youtube_upload", "failed", f"YouTube upload failed: {error_msg}")
             db.commit()
+
         logger.exception("YouTube upload failed for job %s", job_id)
+
+        if not should_retry:
+            return  # Do not retry auth/quota failures
+
         raise self.retry(exc=exc, countdown=10)
     finally:
         db.close()
@@ -331,11 +363,38 @@ def process_video_job(self, job_id: str) -> None:
     except Exception as exc:
         db.rollback()
         job = db.get(VideoJob, job_id)
+
+        # Detect OpenAI insufficient_quota errors – do not retry these.
+        should_retry = True
+        error_msg = str(exc)
+
+        try:
+            import openai  # noqa: PLC0415
+            if isinstance(exc, openai.RateLimitError):
+                # Distinguish quota-exhausted from transient rate-limit
+                if "insufficient_quota" in error_msg or "exceeded your current quota" in error_msg:
+                    should_retry = False
+                    error_msg = (
+                        "OpenAI API quota exhausted. "
+                        "Please add credits at https://platform.openai.com/settings/organization/billing"
+                    )
+                # Otherwise it is a transient rate limit – retry as usual
+        except ImportError:
+            pass
+
         if job:
-            set_job_status(db, job, "failed", error_message=str(exc))
-            add_job_event(db, job.id, "pipeline", "failed", f"Pipeline failed: {exc}")
+            if not should_retry:
+                set_job_status(db, job, "failed", error_message=error_msg)
+            else:
+                set_job_status(db, job, "failed", error_message=str(exc))
+            add_job_event(db, job.id, "pipeline", "failed", f"Pipeline failed: {error_msg}")
             db.commit()
+
         logger.exception("Failed processing video job %s", job_id)
+
+        if not should_retry:
+            return  # Do not retry quota-exhausted failures
+
         raise self.retry(exc=exc, countdown=5)
     finally:
         db.close()

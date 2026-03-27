@@ -1,14 +1,48 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
-import { videoJobsApi } from "@/lib/api";
+import { useRouter } from "next/navigation";
+import { videoJobsApi, projectsApi } from "@/lib/api";
+import { isAuthenticated, removeToken } from "@/lib/auth";
 
 export default function Home() {
+  const router = useRouter();
   const [projectId, setProjectId] = useState("");
   const [topic, setTopic] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    if (!isAuthenticated()) {
+      router.replace("/login");
+      return;
+    }
+
+    async function loadProject() {
+      try {
+        const projects = await projectsApi.list();
+        if (projects.length > 0) {
+          setProjectId(projects[0].id);
+        } else {
+          const created = await projectsApi.create(
+            "Default Channel",
+            "Auto-created project"
+          );
+          setProjectId(created.id);
+        }
+      } catch {
+        // If fetching projects fails the 401 interceptor will redirect to login
+      }
+    }
+
+    loadProject();
+  }, [router]);
+
+  function handleLogout() {
+    removeToken();
+    router.replace("/login");
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -18,7 +52,6 @@ export default function Home() {
       const job = await videoJobsApi.create({ project_id: projectId, topic });
       setStatus("success");
       setMessage(`Job created! ID: ${job.id} — Status: ${job.status}`);
-      setProjectId("");
       setTopic("");
     } catch {
       setStatus("error");
@@ -29,9 +62,17 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex flex-col items-center justify-center px-4">
       <div className="w-full max-w-lg bg-white dark:bg-zinc-900 rounded-2xl shadow-md p-8">
-        <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50 mb-2">
-          🎬 Auto-YouTube
-        </h1>
+        <div className="flex items-start justify-between mb-2">
+          <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50">
+            🎬 Auto-YouTube
+          </h1>
+          <button
+            onClick={handleLogout}
+            className="text-sm text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
+          >
+            Sign out
+          </button>
+        </div>
         <p className="text-zinc-500 dark:text-zinc-400 mb-8">
           Submit a new video topic and the pipeline will take care of the rest.
         </p>

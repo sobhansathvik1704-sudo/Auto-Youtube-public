@@ -45,6 +45,7 @@ def create_video_job(
         language_mode=payload.language_mode,
         video_format=payload.video_format,
         duration_seconds=payload.duration_seconds,
+        avatar_mode=payload.avatar_mode,
         status="queued",
     )
     db.add(job)

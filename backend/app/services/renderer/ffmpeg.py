@@ -15,6 +15,7 @@ from app.services.renderer.timeline import resolve_dimensions
 from app.utils.fs import ensure_dir
 
 logger = logging.getLogger(__name__)
+
 settings = get_settings()
 
 # Gradient colour schemes per scene type: (top-left colour, bottom-right colour)
@@ -308,36 +309,19 @@ def _build_fade_filter(scenes: list[Scene]) -> str:
     return ",".join(parts)
 
 
-def render_video(
-    db: Session,
-    job: VideoJob,
-    scenes: list[Scene],
-    audio_path: Path,
+def _concat_avatar_clips(
+    scene_clips: list[Path],
     subtitles_path: Path,
+    audio_path: Path,
     output_path: Path,
-) -> Path:
-    width, height = resolve_dimensions(job)
-    scene_dir = ensure_dir(output_path.parent / "scene_frames")
+) -> None:
+    """Concatenate D-ID avatar video clips, overlay subtitles, and mix in TTS audio."""
+    settings = get_settings()
+    concat_file = output_path.parent / "avatar_concat.txt"
+    with concat_file.open("w", encoding="utf-8") as fh:
+        for clip in scene_clips:
+            fh.write(f"file '{clip.as_posix()}'\n")
 
-    total_scenes = len(scenes)
-    concat_file = output_path.parent / "concat.txt"
-    image_paths: list[Path] = []
-
-    with concat_file.open("w", encoding="utf-8") as handle:
-        for scene in scenes:
-            scene_image = scene_dir / f"{scene.scene_index:03d}.png"
-            create_scene_image(scene, width, height, scene_image, total_scenes=total_scenes)
-            image_paths.append(scene_image)
-
-            handle.write(f"file '{scene_image.as_posix()}'\n")
-            handle.write(f"duration {scene.duration_ms / 1000:.3f}\n")
-
-    if image_paths:
-        handle = concat_file.open("a", encoding="utf-8")
-        handle.write(f"file '{image_paths[-1].as_posix()}'\n")
-        handle.close()
-
-    # Build subtitle filter with ASS-style force_style for better appearance
     subtitle_filter = (
         f"subtitles={subtitles_path.as_posix()}"
         ":force_style='FontName=DejaVu Sans,FontSize=22,"
@@ -346,35 +330,141 @@ def render_video(
         "BorderStyle=4,MarginV=30'"
     )
 
-    # Add per-scene fade-in/fade-out transitions
-    fade_filter = _build_fade_filter(scenes)
-    vf_filter = f"{fade_filter},{subtitle_filter}" if fade_filter else subtitle_filter
-
     cmd = [
         settings.ffmpeg_bin,
         "-y",
-        "-f",
-        "concat",
-        "-safe",
-        "0",
-        "-i",
-        str(concat_file),
-        "-i",
-        str(audio_path),
-        "-vf",
-        vf_filter,
-        "-r",
-        str(settings.video_render_fps),
-        "-pix_fmt",
-        "yuv420p",
-        "-c:v",
-        "libx264",
-        "-c:a",
-        "aac",
+        "-f", "concat",
+        "-safe", "0",
+        "-i", str(concat_file),
+        "-i", str(audio_path),
+        "-vf", subtitle_filter,
+        "-pix_fmt", "yuv420p",
+        "-c:v", "libx264",
+        "-c:a", "aac",
         "-shortest",
         str(output_path),
     ]
+    logger.debug("FFmpeg avatar concat command: %s", cmd)
     subprocess.run(cmd, check=True, capture_output=True)
+
+
+def render_video(
+    db: Session,
+    job: VideoJob,
+    scenes: list[Scene],
+    audio_path: Path,
+    subtitles_path: Path,
+    output_path: Path,
+) -> Path:
+    from app.services.avatar.factory import get_avatar_provider
+    from app.services.avatar.did_provider import DIDProvider
+
+    width, height = resolve_dimensions(job)
+
+    # Per-job avatar_mode takes precedence; fall back to global settings
+    job_avatar_mode = getattr(job, "avatar_mode", None) or settings.avatar_provider
+    avatar = get_avatar_provider(mode=job_avatar_mode)
+    use_did = isinstance(avatar, DIDProvider)
+
+    if use_did and isinstance(avatar, DIDProvider):
+        # --- D-ID avatar path ---
+        clips_dir = ensure_dir(output_path.parent / "avatar_clips")
+        scene_clips: list[Path] = []
+
+        for scene in scenes:
+            clip_path = clips_dir / f"scene_{scene.scene_index:03d}.mp4"
+            narration = scene.narration_text or scene.on_screen_text or ""
+            try:
+                logger.info(
+                    "Generating D-ID avatar clip for scene %d", scene.scene_index
+                )
+                avatar.generate_scene_video(
+                    scene_text=narration,
+                    scene_index=scene.scene_index,
+                    duration_hint_ms=scene.duration_ms,
+                    output_path=clip_path,
+                )
+                scene_clips.append(clip_path)
+            except Exception as exc:
+                logger.warning(
+                    "D-ID failed for scene %d (%s); falling back to static slide",
+                    scene.scene_index,
+                    exc,
+                )
+                # Fallback: generate a static image clip for this scene
+                scene_dir = ensure_dir(output_path.parent / "scene_frames")
+                scene_image = scene_dir / f"{scene.scene_index:03d}.png"
+                create_scene_image(scene, width, height, scene_image, total_scenes=len(scenes))
+                from app.services.avatar.static_provider import StaticAvatarProvider
+                StaticAvatarProvider.image_to_clip(
+                    image_path=scene_image,
+                    duration_s=scene.duration_ms / 1000.0,
+                    output_path=clip_path,
+                )
+                scene_clips.append(clip_path)
+
+        _concat_avatar_clips(scene_clips, subtitles_path, audio_path, output_path)
+
+    else:
+        # --- Static slide path (default) ---
+        scene_dir = ensure_dir(output_path.parent / "scene_frames")
+
+        total_scenes = len(scenes)
+        concat_file = output_path.parent / "concat.txt"
+        image_paths: list[Path] = []
+
+        with concat_file.open("w", encoding="utf-8") as handle:
+            for scene in scenes:
+                scene_image = scene_dir / f"{scene.scene_index:03d}.png"
+                create_scene_image(scene, width, height, scene_image, total_scenes=total_scenes)
+                image_paths.append(scene_image)
+
+                handle.write(f"file '{scene_image.as_posix()}'\n")
+                handle.write(f"duration {scene.duration_ms / 1000:.3f}\n")
+
+        if image_paths:
+            handle = concat_file.open("a", encoding="utf-8")
+            handle.write(f"file '{image_paths[-1].as_posix()}'\n")
+            handle.close()
+
+        # Build subtitle filter with ASS-style force_style for better appearance
+        subtitle_filter = (
+            f"subtitles={subtitles_path.as_posix()}"
+            ":force_style='FontName=DejaVu Sans,FontSize=22,"
+            "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
+            "Outline=2,Shadow=1,BackColour=&H80000000,"
+            "BorderStyle=4,MarginV=30'"
+        )
+
+        # Add per-scene fade-in/fade-out transitions
+        fade_filter = _build_fade_filter(scenes)
+        vf_filter = f"{fade_filter},{subtitle_filter}" if fade_filter else subtitle_filter
+
+        cmd = [
+            settings.ffmpeg_bin,
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(concat_file),
+            "-i",
+            str(audio_path),
+            "-vf",
+            vf_filter,
+            "-r",
+            str(settings.video_render_fps),
+            "-pix_fmt",
+            "yuv420p",
+            "-c:v",
+            "libx264",
+            "-c:a",
+            "aac",
+            "-shortest",
+            str(output_path),
+        ]
+        subprocess.run(cmd, check=True, capture_output=True)
 
     asset = Asset(
         video_job_id=job.id,

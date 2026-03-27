@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     youtube_client_secrets_file: str = "client_secrets.json"
     youtube_token_file: str = "youtube_token.json"
 
+    # Avatar / Faceless Video
+    avatar_provider: str = "static"  # "static" or "did"
+    did_api_key: str = ""
+    did_avatar_image_url: str = "https://create-images-results.d-id.com/DefaultPresenters/Noelle_f/image.jpeg"
+    did_voice_provider: str = "microsoft"  # "microsoft" or "amazon"
+    did_voice_id: str = "en-US-JennyNeural"  # Microsoft Azure voice
     thumbnail_provider: str = "pillow"  # "pillow" or "dalle"
     pexels_api_key: str = ""
     image_provider: str = "gradient"  # "pexels" or "gradient"

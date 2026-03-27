@@ -132,6 +132,12 @@ export default function DashboardPage() {
             >
               + New Video
             </Link>
+            <Link
+              href="/schedules"
+              className="rounded-lg border border-indigo-300 dark:border-indigo-700 px-4 py-2 text-sm font-semibold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors"
+            >
+              ⏰ Schedules
+            </Link>
             <button
               onClick={handleLogout}
               className="text-sm text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"

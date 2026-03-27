@@ -68,6 +68,25 @@ services:
       - video_artifacts:/data/artifacts
     command: >
       celery -A app.core.celery_app.celery_app worker --loglevel=INFO
+
+  beat:
+    build:
+      context: ./backend
+      network: host
+    container_name: youtube_ai_beat
+    env_file:
+      - ./backend/.env.example
+    environment:
+      - ARTIFACTS_DIR=/data/artifacts
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - video_artifacts:/data/artifacts
+    command: >
+      celery -A app.core.celery_app.celery_app beat --loglevel=info
 
   frontend:
     build:

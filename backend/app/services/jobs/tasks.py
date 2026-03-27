@@ -14,6 +14,7 @@ from app.db.models.asset import Asset
 from app.db.models.job_event import JobEvent
 from app.db.models.project import Project
 from app.db.models.scene import Scene
+from app.db.models.schedule import Schedule
 from app.db.models.script import Script
 from app.db.models.video_job import VideoJob
 from app.services.ai.tts import TTSClient
@@ -509,5 +510,60 @@ def process_video_job(self, job_id: str) -> None:
             return  # Do not retry quota-exhausted failures
 
         raise self.retry(exc=exc, countdown=5)
+    finally:
+        db.close()
+
+
+@celery_app.task(name="app.services.jobs.tasks.check_and_run_schedules")
+def check_and_run_schedules() -> None:
+    """Runs every minute via Celery Beat. Checks for due schedules and triggers video generation."""
+    from app.services.jobs.pipeline import enqueue_video_job
+    from app.utils.cron import calculate_next_run
+
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+        due_schedules = db.scalars(
+            select(Schedule).where(
+                Schedule.is_active,
+                Schedule.next_run_at <= now,
+            )
+        ).all()
+
+        for schedule in due_schedules:
+            topics = json.loads(schedule.topics_json)
+            topic = topics[schedule.current_topic_index % len(topics)]
+
+            job = VideoJob(
+                project_id=schedule.project_id,
+                topic=topic,
+                category=schedule.category,
+                audience_level=schedule.audience_level,
+                language_mode=schedule.language_mode,
+                video_format=schedule.video_format,
+                duration_seconds=schedule.duration_seconds,
+                status="queued",
+            )
+            db.add(job)
+            db.flush()
+
+            enqueue_video_job(job.id)
+
+            schedule.last_run_at = now
+            schedule.current_topic_index = (schedule.current_topic_index + 1) % len(topics)
+            schedule.total_runs += 1
+            schedule.next_run_at = calculate_next_run(schedule.cron_expression, schedule.timezone_str)
+            logger.info(
+                "Schedule %s triggered job %s for topic %r; next run at %s",
+                schedule.id,
+                job.id,
+                topic,
+                schedule.next_run_at,
+            )
+
+        db.commit()
+    except Exception:
+        logger.exception("check_and_run_schedules failed")
+        db.rollback()
     finally:
         db.close()

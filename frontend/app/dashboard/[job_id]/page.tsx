@@ -283,6 +283,8 @@ function ThumbnailPreview({
       className="w-full rounded-xl object-cover"
       style={{ maxHeight: "360px" }}
     />
+  );
+}
 function SEOPreview({ seo }: { seo: SEOMetadata }) {
   const [showFullDesc, setShowFullDesc] = useState(false);
   const TITLE_MAX = 100;
@@ -420,6 +422,7 @@ function SEOPreview({ seo }: { seo: SEOMetadata }) {
 }
 
 export default function VideoJobDetailPage() {
+  const router = useRouter();
   const params = useParams<{ job_id: string }>();
   const jobId = params.job_id;
 

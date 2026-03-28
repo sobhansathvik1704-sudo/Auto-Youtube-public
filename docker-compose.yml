@@ -34,7 +34,7 @@ services:
       network: host  # <--- Added this to fix DNS in WSL
     container_name: youtube_ai_api
     env_file:
-      - ./backend/.env.example
+      - ./backend/.env
     environment:
       - ARTIFACTS_DIR=/data/artifacts
     ports:
@@ -56,7 +56,7 @@ services:
       network: host  # <--- Added this to fix DNS in WSL
     container_name: youtube_ai_worker
     env_file:
-      - ./backend/.env.example
+      - ./backend/.env
     environment:
       - ARTIFACTS_DIR=/data/artifacts
     depends_on:
@@ -75,7 +75,7 @@ services:
       network: host
     container_name: youtube_ai_beat
     env_file:
-      - ./backend/.env.example
+      - ./backend/.env
     environment:
       - ARTIFACTS_DIR=/data/artifacts
     depends_on:
@@ -87,7 +87,8 @@ services:
       - video_artifacts:/data/artifacts
     command: >
       celery -A app.core.celery_app.celery_app beat --loglevel=info
-
+
+
   frontend:
     build:
       context: ./frontend

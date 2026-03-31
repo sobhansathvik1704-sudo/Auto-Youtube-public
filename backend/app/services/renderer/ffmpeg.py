@@ -150,30 +150,55 @@ def create_scene_image(
                 output_path=output_path,
             )
 
-    # --- Background: try Pexels first, fall back to gradient ---
+    # --- Background: try HuggingFace AI first, then Pexels, then gradient ---
     scene_type_key = scene.scene_type.lower() if scene.scene_type else ""
 
-    pexels_tmp = output_path.with_suffix(".pexels.jpg")
-    pexels_path = _fetch_pexels_background(scene, pexels_tmp)
+    # 1. HuggingFace AI image
+    ai_image_path: Path | None = None
+    if settings.image_provider == "huggingface" and settings.hf_api_token:
+        from app.services.images.huggingface_provider import HuggingFaceImageProvider  # noqa: PLC0415
 
-    if pexels_path is not None:
-        try:
-            image = _open_and_fit_image(pexels_path, width, height)
-        except Exception as exc:
-            logger.warning("Failed to open Pexels image %s: %s — using gradient", pexels_path, exc)
-            pexels_path = None
+        hf_provider = HuggingFaceImageProvider(
+            api_token=settings.hf_api_token,
+            model=settings.hf_image_model,
+        )
+        prompt = scene.visual_prompt or scene.on_screen_text or scene.narration_text or scene.scene_type or ""
+        ai_tmp = output_path.with_suffix(".ai.png")
+        ai_image_path = hf_provider.generate_image(prompt, ai_tmp)
+        if ai_image_path is not None:
+            try:
+                image = _open_and_fit_image(ai_image_path, width, height)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to open AI image %s: %s — trying next provider", ai_image_path, exc
+                )
+                ai_image_path = None
 
-    if pexels_path is None:
+    # 2. Pexels stock photo (when HuggingFace is not used or failed)
+    pexels_path: Path | None = None
+    if ai_image_path is None:
+        pexels_tmp = output_path.with_suffix(".pexels.jpg")
+        pexels_path = _fetch_pexels_background(scene, pexels_tmp)
+
+        if pexels_path is not None:
+            try:
+                image = _open_and_fit_image(pexels_path, width, height)
+            except Exception as exc:
+                logger.warning("Failed to open Pexels image %s: %s — using gradient", pexels_path, exc)
+                pexels_path = None
+
+    # 3. Gradient fallback
+    if ai_image_path is None and pexels_path is None:
         color_top, color_bottom = _GRADIENT_SCHEMES.get(scene_type_key, _DEFAULT_GRADIENT)
         image = Image.new("RGB", (width, height))
         _draw_gradient_background(image, color_top, color_bottom)
 
     # Overlay layer for semi-transparent elements (RGBA composite).
-    # When using a Pexels stock photo apply a full-frame dark veil first so that
-    # text is always legible regardless of image content.
+    # When using a photo-based background (AI or Pexels) apply a full-frame dark
+    # veil so that text is always legible regardless of image content.
     overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     ov_draw = ImageDraw.Draw(overlay)
-    if pexels_path is not None:
+    if ai_image_path is not None or pexels_path is not None:
         ov_draw.rectangle([0, 0, width, height], fill=(0, 0, 0, 140))
 
     scale = height / 1080  # normalise to 1080p
@@ -309,6 +334,69 @@ def _build_fade_filter(scenes: list[Scene]) -> str:
     return ",".join(parts)
 
 
+def _image_to_kenburns_clip(
+    image_path: Path,
+    duration_s: float,
+    output_path: Path,
+    width: int,
+    height: int,
+    effect: str | None = None,
+) -> Path:
+    """Convert a static image to an animated clip with a Ken Burns zoom/pan effect.
+
+    *effect* may be one of ``"zoom_in"``, ``"zoom_out"``, ``"pan_right"``,
+    ``"pan_left"``.  When ``None`` an effect is chosen at random.
+    """
+    import random  # noqa: PLC0415
+
+    if effect is None:
+        effect = random.choice(["zoom_in", "zoom_out", "pan_right", "pan_left"])
+
+    fps = settings.video_render_fps
+    total_frames = max(1, int(duration_s * fps))
+
+    if effect == "zoom_in":
+        zoompan = (
+            f"zoompan=z='min(zoom+0.001,1.15)'"
+            f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+            f":d={total_frames}:s={width}x{height}:fps={fps}"
+        )
+    elif effect == "zoom_out":
+        zoompan = (
+            f"zoompan=z='if(lte(zoom,1.0),1.15,max(1.001,zoom-0.001))'"
+            f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+            f":d={total_frames}:s={width}x{height}:fps={fps}"
+        )
+    elif effect == "pan_right":
+        zoompan = (
+            f"zoompan=z='1.1'"
+            f":x='if(lte(on,1),0,min(iw/1.1-iw/zoom,x+1))'"
+            f":y='ih/2-(ih/zoom/2)'"
+            f":d={total_frames}:s={width}x{height}:fps={fps}"
+        )
+    else:  # pan_left
+        zoompan = (
+            f"zoompan=z='1.1'"
+            f":x='if(lte(on,1),iw/1.1-iw/zoom,max(0,x-1))'"
+            f":y='ih/2-(ih/zoom/2)'"
+            f":d={total_frames}:s={width}x{height}:fps={fps}"
+        )
+
+    cmd = [
+        settings.ffmpeg_bin,
+        "-y",
+        "-loop", "1",
+        "-i", str(image_path),
+        "-vf", zoompan,
+        "-t", str(duration_s),
+        "-pix_fmt", "yuv420p",
+        "-c:v", "libx264",
+        str(output_path),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True)
+    return output_path
+
+
 def _concat_avatar_clips(
     scene_clips: list[Path],
     subtitles_path: Path,
@@ -408,24 +496,44 @@ def render_video(
     else:
         # --- Static slide path (default) ---
         scene_dir = ensure_dir(output_path.parent / "scene_frames")
+        clips_dir = ensure_dir(output_path.parent / "kenburns_clips")
 
         total_scenes = len(scenes)
         concat_file = output_path.parent / "concat.txt"
-        image_paths: list[Path] = []
+        scene_clips: list[Path] = []
 
+        for scene in scenes:
+            scene_image = scene_dir / f"{scene.scene_index:03d}.png"
+            create_scene_image(scene, width, height, scene_image, total_scenes=total_scenes)
+
+            clip_path = clips_dir / f"scene_{scene.scene_index:03d}.mp4"
+            duration_s = scene.duration_ms / 1000.0
+            try:
+                _image_to_kenburns_clip(scene_image, duration_s, clip_path, width, height)
+            except Exception as exc:
+                logger.warning(
+                    "Ken Burns clip failed for scene %d (%s); using static loop",
+                    scene.scene_index,
+                    exc,
+                )
+                # Fallback: simple looped still image via concat demuxer entry (handled below)
+                clip_path = scene_image  # flag: will be handled as a still in concat
+            scene_clips.append(clip_path)
+
+        # Build concat file for the per-scene clips
         with concat_file.open("w", encoding="utf-8") as handle:
-            for scene in scenes:
-                scene_image = scene_dir / f"{scene.scene_index:03d}.png"
-                create_scene_image(scene, width, height, scene_image, total_scenes=total_scenes)
-                image_paths.append(scene_image)
+            for scene, clip in zip(scenes, scene_clips):
+                if clip.suffix == ".png":
+                    # Fallback still image — write as a timed entry in the concat list
+                    handle.write(f"file '{clip.as_posix()}'\n")
+                    handle.write(f"duration {scene.duration_ms / 1000:.3f}\n")
+                else:
+                    handle.write(f"file '{clip.as_posix()}'\n")
 
-                handle.write(f"file '{scene_image.as_posix()}'\n")
-                handle.write(f"duration {scene.duration_ms / 1000:.3f}\n")
-
-        if image_paths:
-            handle = concat_file.open("a", encoding="utf-8")
-            handle.write(f"file '{image_paths[-1].as_posix()}'\n")
-            handle.close()
+            # Repeat last entry to avoid ffmpeg concat truncation
+            if scene_clips:
+                last = scene_clips[-1]
+                handle.write(f"file '{last.as_posix()}'\n")
 
         # Build subtitle filter with ASS-style force_style for better appearance
         subtitle_filter = (
@@ -436,9 +544,13 @@ def render_video(
             "BorderStyle=4,MarginV=30'"
         )
 
-        # Add per-scene fade-in/fade-out transitions
-        fade_filter = _build_fade_filter(scenes)
-        vf_filter = f"{fade_filter},{subtitle_filter}" if fade_filter else subtitle_filter
+        # Add per-scene fade-in/fade-out transitions when clips are still images
+        has_stills = any(c.suffix == ".png" for c in scene_clips)
+        if has_stills:
+            fade_filter = _build_fade_filter(scenes)
+            vf_filter = f"{fade_filter},{subtitle_filter}" if fade_filter else subtitle_filter
+        else:
+            vf_filter = subtitle_filter
 
         cmd = [
             settings.ffmpeg_bin,

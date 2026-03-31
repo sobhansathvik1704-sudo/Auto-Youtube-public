@@ -37,13 +37,17 @@ def generate_scenes_from_script(db: Session, job: VideoJob, script: Script) -> l
             asset_config["code_snippet"] = segment.get("code_snippet", "")
             asset_config["code_language"] = segment.get("code_language", "")
 
+        scene_subject = segment.get("on_screen_text") or job.topic
         scene = Scene(
             video_job_id=job.id,
             scene_index=idx,
             scene_type=scene_type,
             narration_text=segment["narration"],
             on_screen_text=segment.get("on_screen_text"),
-            visual_prompt=f"Tech/coding explainer scene for {job.topic}, style={scene_type}",
+            visual_prompt=(
+                f"Cinematic {scene_type.replace('_', ' ')} scene about {scene_subject},"
+                f" topic: {job.topic}, dramatic lighting, professional"
+            ),
             asset_config_json=json.dumps(asset_config, ensure_ascii=False),
             duration_ms=duration_ms,
             start_ms=current_ms,

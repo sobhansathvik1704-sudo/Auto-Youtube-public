@@ -67,7 +67,9 @@ class Settings(BaseSettings):
     did_voice_id: str = "en-US-JennyNeural"  # Microsoft Azure voice
     thumbnail_provider: str = "pillow"  # "pillow" or "dalle"
     pexels_api_key: str = ""
-    image_provider: str = "gradient"  # "pexels" or "gradient"
+    image_provider: str = "gradient"  # "huggingface", "pexels", or "gradient"
+    hf_api_token: str = ""  # HuggingFace API token (free)
+    hf_image_model: str = "stabilityai/stable-diffusion-xl-base-1.0"
 
     model_config = SettingsConfigDict(
         env_file=".env.example",

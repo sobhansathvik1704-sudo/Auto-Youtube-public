@@ -59,10 +59,7 @@ class PollinationsImageProvider:
         """
         global _last_request_time
 
-        cinematic_prompt = (
-            f"cinematic, dramatic lighting, 4K, film still, professional photography, {prompt}"
-        )
-        encoded = urllib.parse.quote(cinematic_prompt)
+        encoded = urllib.parse.quote(prompt)
         url = (
             f"{_POLLINATIONS_BASE_URL}/{encoded}"
             f"?width={width}&height={height}&nologo=true&model={self.model}&seed=-1"

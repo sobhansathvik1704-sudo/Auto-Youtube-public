@@ -71,8 +71,8 @@ def test_generate_image_url_contains_prompt(tmp_path: Path):
     assert _POLLINATIONS_BASE_URL in captured_urls[0]
 
 
-def test_generate_image_url_contains_cinematic_prefix(tmp_path: Path):
-    """The cinematic prefix must be included in the URL."""
+def test_generate_image_url_uses_prompt_directly(tmp_path: Path):
+    """The prompt must be URL-encoded and used directly without any added prefix."""
     provider = _make_provider()
     output_path = tmp_path / "out.jpg"
 
@@ -87,7 +87,10 @@ def test_generate_image_url_contains_cinematic_prefix(tmp_path: Path):
             provider.generate_image("a forest", output_path)
 
     assert len(captured_urls) == 1
-    assert "cinematic" in captured_urls[0].lower()
+    assert "a%20forest" in captured_urls[0]
+    # The old generic cinematic prefix must NOT be injected so technical prompts
+    # are not overridden by unrelated cinematography styling.
+    assert "cinematic" not in captured_urls[0].lower()
 
 
 def test_generate_image_url_contains_dimensions(tmp_path: Path):

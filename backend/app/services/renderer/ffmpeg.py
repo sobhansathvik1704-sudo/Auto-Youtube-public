@@ -20,7 +20,12 @@ settings = get_settings()
 
 # Gradient colour schemes per scene type: (top-left colour, bottom-right colour)
 _GRADIENT_SCHEMES: dict[str, tuple[tuple[int, int, int], tuple[int, int, int]]] = {
-    "intro": ((15, 32, 120), (100, 20, 160)),           # blue → purple
+    # Shorts-format types
+    "hook": ((10, 10, 40), (60, 0, 100)),               # very dark → deep purple
+    "beat": ((5, 15, 45), (10, 50, 90)),                 # near-black navy → dark blue
+    "takeaway": ((0, 40, 50), (0, 100, 70)),             # dark teal → emerald
+    # Legacy types (kept for backward compatibility)
+    "intro": ((15, 32, 120), (100, 20, 160)),            # blue → purple
     "outro": ((100, 20, 140), (200, 40, 100)),           # purple → pink
     "content": ((10, 60, 120), (20, 130, 160)),          # dark blue → teal
     "title_card": ((20, 60, 150), (80, 20, 180)),        # royal blue → deep purple
@@ -28,6 +33,14 @@ _GRADIENT_SCHEMES: dict[str, tuple[tuple[int, int, int], tuple[int, int, int]]] 
     "bullet_explainer": ((30, 80, 160), (10, 160, 180)), # cobalt → cyan
     "icon_compare": ((120, 30, 60), (200, 80, 20)),      # crimson → amber
 }
+
+# Accent / text colours for Shorts scene types
+_HOOK_TEXT_COLOR: tuple[int, int, int, int] = (255, 220, 50, 255)      # bright yellow
+_HOOK_ACCENT_COLOR: tuple[int, int, int, int] = (255, 200, 50, 200)    # warm yellow
+_BEAT_TEXT_COLOR: tuple[int, int, int, int] = (255, 255, 255, 255)     # white
+_BEAT_ACCENT_COLOR: tuple[int, int, int, int] = (0, 200, 255, 180)     # cyan
+_TAKEAWAY_TEXT_COLOR: tuple[int, int, int, int] = (80, 255, 160, 255)  # emerald green
+_TAKEAWAY_ACCENT_COLOR: tuple[int, int, int, int] = (0, 230, 120, 230) # bright green
 _DEFAULT_GRADIENT = ((30, 60, 130), (20, 130, 160))  # visible blue → teal
 
 
@@ -279,7 +292,137 @@ def create_scene_image(
     # for template selection and should not appear as visible video text.
     show_header = False
 
-    if scene_type_key == "intro":
+    # --- Shorts-format scene types: hook, beat, takeaway ---
+    # These use a card-free design with large text directly on the background,
+    # optimised for mobile readability and fast visual pacing.
+
+    if scene_type_key == "hook":
+        # HOOK: Bold centred question/statement in the middle of the screen.
+        # No card — text sits directly on the AI background with a strong shadow.
+        hook_font_size = min(int(72 * scale), 90)
+        hook_font = _font(hook_font_size, bold=True)
+
+        # Dark scrim across the whole frame so text pops on any background
+        scrim = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        scrim_draw = ImageDraw.Draw(scrim)
+        scrim_draw.rectangle([0, 0, width, height], fill=(0, 0, 0, 120))
+        image = image.convert("RGBA")
+        image = Image.alpha_composite(image, scrim)
+
+        inner_w = int(width * 0.88)
+        lines = _wrap_text(body_text, hook_font, inner_w)
+        line_h = hook_font_size + int(18 * scale)
+        total_h = len(lines) * line_h
+        # Centre vertically in the upper 60% of the frame
+        area_top = int(height * 0.20)
+        area_bottom = int(height * 0.70)
+        text_y = area_top + max(0, ((area_bottom - area_top) - total_h) // 2)
+        for line in lines:
+            lb = hook_font.getbbox(line)
+            lx = (width - (lb[2] - lb[0])) // 2
+            _draw_text_with_shadow(ov_draw, (lx, text_y), line,
+                                   font=hook_font, fill=_HOOK_TEXT_COLOR,
+                                   shadow_offset=4, shadow_fill=(0, 0, 0, 220))
+            text_y += line_h
+
+        # Thin accent bar at the very bottom of text block
+        bar_y = text_y + int(8 * scale)
+        bar_x0 = int(width * 0.25)
+        bar_x1 = int(width * 0.75)
+        ov_draw.rounded_rectangle([bar_x0, bar_y, bar_x1, bar_y + int(5 * scale)],
+                                   radius=3, fill=_HOOK_ACCENT_COLOR)
+
+    elif scene_type_key == "beat":
+        # BEAT: Short phrase in large bold font placed in the lower third.
+        # Mobile-safe zone. No card — clean text with shadow over AI background.
+        beat_font_size = min(int(64 * scale), 80)
+        beat_font = _font(beat_font_size, bold=True)
+
+        inner_w = int(width * 0.90)
+        lines = _wrap_text(body_text, beat_font, inner_w)
+        line_h = beat_font_size + int(14 * scale)
+        total_h = len(lines) * line_h
+
+        # Place in the lower third (portrait: 58–85%)
+        if is_portrait:
+            zone_top = int(height * 0.58)
+            zone_bottom = int(height * 0.88)
+        else:
+            zone_top = int(height * 0.55)
+            zone_bottom = int(height * 0.90)
+
+        # Semi-transparent pill behind the text block for readability
+        pill_pad_x = int(28 * scale)
+        pill_pad_y = int(18 * scale)
+        pill_x0 = int(width * 0.05)
+        pill_x1 = int(width * 0.95)
+        pill_y0 = zone_top - pill_pad_y
+        pill_y1 = zone_top + total_h + pill_pad_y
+        _draw_rounded_rect(ov_draw, (pill_x0, pill_y0, pill_x1, pill_y1),
+                           radius=18, fill=(0, 0, 0, 175))
+
+        text_y = zone_top
+        for line in lines:
+            lb = beat_font.getbbox(line)
+            lx = (width - (lb[2] - lb[0])) // 2
+            _draw_text_with_shadow(ov_draw, (lx, text_y), line,
+                                   font=beat_font, fill=_BEAT_TEXT_COLOR,
+                                   shadow_offset=3, shadow_fill=(0, 0, 0, 200))
+            text_y += line_h
+
+        # Thin coloured accent bar above text pill
+        bar_x0 = int(width * 0.30)
+        bar_x1 = int(width * 0.70)
+        bar_y = pill_y0 - int(8 * scale)
+        ov_draw.rounded_rectangle([bar_x0, bar_y, bar_x1, bar_y + int(4 * scale)],
+                                   radius=2, fill=_BEAT_ACCENT_COLOR)
+
+    elif scene_type_key == "takeaway":
+        # TAKEAWAY: Centred insight phrase with a distinct accent treatment.
+        # Acts as the memorable conclusion — uses a bright accent colour.
+        take_font_size = min(int(68 * scale), 84)
+        take_font = _font(take_font_size, bold=True)
+
+        # Scrim for contrast
+        scrim2 = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        scrim2_draw = ImageDraw.Draw(scrim2)
+        scrim2_draw.rectangle([0, 0, width, height], fill=(0, 0, 0, 100))
+        image = image.convert("RGBA")
+        image = Image.alpha_composite(image, scrim2)
+
+        inner_w = int(width * 0.88)
+        lines = _wrap_text(body_text, take_font, inner_w)
+        line_h = take_font_size + int(16 * scale)
+        total_h = len(lines) * line_h
+
+        if is_portrait:
+            area_top, area_bottom = int(height * 0.25), int(height * 0.75)
+        else:
+            area_top, area_bottom = int(height * 0.20), int(height * 0.80)
+
+        text_y = area_top + max(0, ((area_bottom - area_top) - total_h) // 2)
+
+        # Pill background
+        pill_x0 = int(width * 0.04)
+        pill_x1 = int(width * 0.96)
+        pill_y0 = text_y - int(20 * scale)
+        pill_y1 = text_y + total_h + int(20 * scale)
+        _draw_rounded_rect(ov_draw, (pill_x0, pill_y0, pill_x1, pill_y1),
+                           radius=20, fill=(0, 0, 0, 160))
+
+        # Accent bar at top of pill
+        ov_draw.rounded_rectangle([pill_x0, pill_y0, pill_x1, pill_y0 + int(6 * scale)],
+                                   radius=4, fill=_TAKEAWAY_ACCENT_COLOR)
+
+        for line in lines:
+            lb = take_font.getbbox(line)
+            lx = (width - (lb[2] - lb[0])) // 2
+            _draw_text_with_shadow(ov_draw, (lx, text_y), line,
+                                   font=take_font, fill=_TAKEAWAY_TEXT_COLOR,
+                                   shadow_offset=3, shadow_fill=(0, 0, 0, 210))
+            text_y += line_h
+
+    elif scene_type_key == "intro":
         # Centred large title layout
         if is_portrait:
             card_x0, card_y0 = int(width * 0.04), int(height * 0.35)

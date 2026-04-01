@@ -1,5 +1,5 @@
 """Tests for LocalLLMProvider — verifies that local fallback produces valid,
-visible-content scripts (no blank scenes)."""
+visible-content Shorts-format scripts (hook → beats → takeaway)."""
 
 import pytest
 
@@ -41,16 +41,22 @@ class TestLocalProviderStructure:
 
     def test_segments_count_in_range(self, provider):
         payload = _generate(provider, duration=60)
-        # For 60s, ceil(60/10)=6 segments clamped to [4,8]
-        assert 4 <= len(payload["segments"]) <= 8
+        # Shorts format: 1 hook + 3-5 beats + 1 takeaway = 5-7 segments
+        assert 5 <= len(payload["segments"]) <= 7
 
-    def test_first_segment_is_intro(self, provider):
+    def test_first_segment_is_hook(self, provider):
         payload = _generate(provider)
-        assert payload["segments"][0]["purpose"] == "intro"
+        assert payload["segments"][0]["purpose"] == "hook"
 
-    def test_last_segment_is_outro(self, provider):
+    def test_last_segment_is_takeaway(self, provider):
         payload = _generate(provider)
-        assert payload["segments"][-1]["purpose"] == "outro"
+        assert payload["segments"][-1]["purpose"] == "takeaway"
+
+    def test_middle_segments_are_beats(self, provider):
+        payload = _generate(provider)
+        # All segments between hook and takeaway must be beats
+        for seg in payload["segments"][1:-1]:
+            assert seg["purpose"] == "beat", f"Expected beat, got: {seg['purpose']}"
 
     def test_no_segment_has_empty_narration(self, provider):
         payload = _generate(provider)
@@ -61,6 +67,14 @@ class TestLocalProviderStructure:
         payload = _generate(provider)
         for seg in payload["segments"]:
             assert seg.get("on_screen_text", "").strip(), f"Empty on_screen_text in segment: {seg}"
+
+    def test_all_segments_have_visual_concept(self, provider):
+        """Every segment should include a visual_concept for image generation."""
+        payload = _generate(provider)
+        for seg in payload["segments"]:
+            assert seg.get("visual_concept", "").strip(), (
+                f"Missing visual_concept in segment: {seg}"
+            )
 
     def test_no_code_snippet_in_local_segments(self, provider):
         """Local provider must never produce code_snippet — prevents blank code_card scenes."""
@@ -79,14 +93,27 @@ class TestLocalProviderStructure:
         for seg in payload["segments"]:
             assert seg["duration_seconds"] > 0, f"Non-positive duration in segment: {seg}"
 
+    def test_short_on_screen_text(self, provider):
+        """on_screen_text should be brief (≤ 10 words) for mobile readability."""
+        payload = _generate(provider)
+        for seg in payload["segments"]:
+            word_count = len(seg.get("on_screen_text", "").split())
+            assert word_count <= 10, (
+                f"on_screen_text too long ({word_count} words): {seg['on_screen_text']!r}"
+            )
+
 
 class TestLocalProviderVariety:
-    def test_content_segments_have_unique_on_screen_texts(self, provider):
-        """Templates are selected without replacement, so within one call each segment is unique."""
+    def test_beat_segments_have_unique_on_screen_texts(self, provider):
+        """Beat templates are selected without replacement, so on_screen texts differ."""
         payload = _generate(provider)
-        content_texts = [seg["on_screen_text"] for seg in payload["segments"][1:-1]]
-        assert len(content_texts) == len(set(content_texts)), (
-            "Content segments should have unique on_screen_text values (no-replacement selection)"
+        beat_texts = [
+            seg["on_screen_text"]
+            for seg in payload["segments"]
+            if seg["purpose"] == "beat"
+        ]
+        assert len(beat_texts) == len(set(beat_texts)), (
+            "Beat segments should have unique on_screen_text values (no-replacement selection)"
         )
 
     def test_different_topics_produce_different_titles(self, provider):
@@ -105,4 +132,5 @@ class TestLocalProviderDurations:
             language_mode="english",
             duration_seconds=duration,
         )
-        assert 4 <= len(payload["segments"]) <= 8
+        # Shorts format: 5-7 segments (1 hook + 3-5 beats + 1 takeaway)
+        assert 5 <= len(payload["segments"]) <= 7

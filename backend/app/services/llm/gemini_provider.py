@@ -191,10 +191,11 @@ class GeminiLLMProvider(BaseLLMProvider):
         current = 0
         for idx, seg in enumerate(segments):
             seg.setdefault("order", idx + 1)
-            seg.setdefault("purpose", "explanation")
+            seg.setdefault("purpose", "beat")
             seg.setdefault("narration", "")
             seg.setdefault("on_screen_text", "")
-            seg_duration = int(seg.get("duration_seconds", 10))
+            seg.setdefault("visual_concept", "")
+            seg_duration = int(seg.get("duration_seconds", 4))
             seg["duration_seconds"] = seg_duration
             seg["start_seconds"] = current
             seg["end_seconds"] = current + seg_duration

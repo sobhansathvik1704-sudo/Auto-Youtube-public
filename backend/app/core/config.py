@@ -71,7 +71,7 @@ class Settings(BaseSettings):
     pexels_api_key: str = ""
     image_provider: str = "gradient"  # "huggingface", "pexels", or "gradient"
     hf_api_token: str = ""  # HuggingFace API token (free)
-    hf_image_model: str = "stabilityai/stable-diffusion-xl-base-1.0"
+    hf_image_model: str = "black-forest-labs/FLUX.1-schnell"
 
     model_config = SettingsConfigDict(
         env_file=".env.example",

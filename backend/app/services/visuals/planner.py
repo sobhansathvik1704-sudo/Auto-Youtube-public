@@ -7,25 +7,36 @@ from app.db.models.script import Script
 from app.db.models.video_job import VideoJob
 
 
-def _scene_type_for_index(index: int) -> str:
+def _scene_type_for_index(index: int, total: int, has_code: bool = False) -> str:
+    """Return the scene type for a 1-based scene index out of *total* scenes.
+
+    Rules:
+    - First scene  → ``"intro"``
+    - Last scene   → ``"outro"``
+    - Middle scenes → alternate ``"bullet_explainer"`` / ``"icon_compare"``.
+      ``"code_card"`` is only used when *has_code* is True.
+    """
     if index == 1:
-        return "title_card"
-    if index % 3 == 0:
+        return "intro"
+    if index == total:
+        return "outro"
+    if has_code:
         return "code_card"
-    if index % 2 == 0:
-        return "bullet_explainer"
-    return "icon_compare"
+    # Alternate between the two content types for visual variety
+    return "bullet_explainer" if (index % 2 == 0) else "icon_compare"
 
 
 def generate_scenes_from_script(db: Session, job: VideoJob, script: Script) -> list[Scene]:
     payload = json.loads(script.structured_json)
     segments = payload.get("segments", [])
+    total = len(segments)
 
     scenes: list[Scene] = []
     current_ms = 0
 
     for idx, segment in enumerate(segments, start=1):
-        scene_type = _scene_type_for_index(idx)
+        has_code = bool(segment.get("code_snippet", "").strip())
+        scene_type = _scene_type_for_index(idx, total, has_code)
         duration_ms = int(segment.get("duration_seconds", 8) * 1000)
 
         asset_config: dict = {

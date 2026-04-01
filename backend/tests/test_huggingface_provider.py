@@ -5,14 +5,17 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.services.images.huggingface_provider import HuggingFaceImageProvider
+from app.services.images.huggingface_provider import (
+    HuggingFaceImageProvider,
+    _FALLBACK_MODELS,
+)
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_provider(token: str = "test-token", model: str = "stabilityai/stable-diffusion-xl-base-1.0") -> HuggingFaceImageProvider:
+def _make_provider(token: str = "test-token", model: str = "black-forest-labs/FLUX.1-schnell") -> HuggingFaceImageProvider:
     return HuggingFaceImageProvider(api_token=token, model=model)
 
 
@@ -21,9 +24,9 @@ def _make_provider(token: str = "test-token", model: str = "stabilityai/stable-d
 # ---------------------------------------------------------------------------
 
 def test_provider_builds_correct_api_url():
-    model = "stabilityai/stable-diffusion-xl-base-1.0"
+    model = "black-forest-labs/FLUX.1-schnell"
     provider = _make_provider(model=model)
-    assert provider.api_url == f"https://api-inference.huggingface.co/models/{model}"
+    assert provider._api_url(model) == f"https://api-inference.huggingface.co/models/{model}"
 
 
 def test_provider_sets_auth_header():
@@ -97,7 +100,7 @@ def test_generate_image_creates_parent_dirs(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 def test_generate_image_returns_none_on_repeated_exception(tmp_path: Path):
-    """If every attempt raises an exception, ``None`` is returned (no crash)."""
+    """If every attempt raises an exception for all models, ``None`` is returned (no crash)."""
     provider = _make_provider()
     output_path = tmp_path / "out.png"
 
@@ -191,3 +194,53 @@ def test_generate_image_retries_on_429(tmp_path: Path):
 
     assert result == output_path
     assert mock_sleep.called
+
+
+def test_generate_image_410_falls_back_to_next_model(tmp_path: Path):
+    """410 Gone on the primary model causes the provider to try the next fallback model."""
+    primary_model = "black-forest-labs/FLUX.1-schnell"
+    fallback_model = [m for m in _FALLBACK_MODELS if m != primary_model][0]
+    provider = _make_provider(model=primary_model)
+    output_path = tmp_path / "out.png"
+    fake_bytes = b"IMG"
+
+    gone_resp = MagicMock()
+    gone_resp.status_code = 410
+
+    ok_resp = MagicMock()
+    ok_resp.status_code = 200
+    ok_resp.content = fake_bytes
+    ok_resp.raise_for_status = MagicMock()
+
+    calls: list = []
+
+    def side_effect(url, **kwargs):  # noqa: ANN001, ANN003
+        calls.append(url)
+        if primary_model in url:
+            return gone_resp
+        return ok_resp
+
+    with patch("app.services.images.huggingface_provider.httpx.post", side_effect=side_effect):
+        result = provider.generate_image("neon city", output_path)
+
+    assert result == output_path
+    assert output_path.read_bytes() == fake_bytes
+    # Primary model was tried and rejected; at least one fallback was used
+    assert any(primary_model in url for url in calls)
+    assert any(fallback_model in url for url in calls)
+
+
+def test_generate_image_returns_none_when_all_models_return_410(tmp_path: Path):
+    """If every model returns 410 Gone, ``None`` is returned without crashing."""
+    provider = _make_provider()
+    output_path = tmp_path / "out.png"
+
+    gone_resp = MagicMock()
+    gone_resp.status_code = 410
+
+    with patch("app.services.images.huggingface_provider.httpx.post", return_value=gone_resp):
+        result = provider.generate_image("anything", output_path)
+
+    assert result is None
+    assert not output_path.exists()
+

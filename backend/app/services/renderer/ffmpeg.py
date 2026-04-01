@@ -200,18 +200,18 @@ def create_scene_image(
         _draw_gradient_background(image, color_top, color_bottom)
 
     # Overlay layer for semi-transparent elements (RGBA composite).
-    # When using a photo-based background (AI or Pexels) apply a full-frame dark
-    # veil so that text is always legible regardless of image content.
+    # Use a lighter card alpha when a photo background is present so the
+    # AI/Pexels image shows through clearly outside the card area.
     overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     ov_draw = ImageDraw.Draw(overlay)
-    if ai_image_path is not None or pexels_path is not None:
-        ov_draw.rectangle([0, 0, width, height], fill=(0, 0, 0, 140))
+    has_photo_bg = ai_image_path is not None or pexels_path is not None
+    card_alpha = 100 if has_photo_bg else 160
 
-    scale = height / 1080  # normalise to 1080p
+    scale = min(width, height) / 1080  # normalise to shorter dimension
     padding = int(80 * scale)
-    title_font_size = int(60 * scale)
-    body_font_size = int(34 * scale)
-    small_font_size = int(24 * scale)
+    title_font_size = min(int(52 * scale), 64)
+    body_font_size = min(int(28 * scale), 38)
+    small_font_size = min(int(20 * scale), 28)
 
     title_font = _font(title_font_size, bold=True)
     body_font = _font(body_font_size, bold=False)
@@ -220,11 +220,23 @@ def create_scene_image(
     scene_label = scene.scene_type.replace("_", " ").title()
     body_text = scene.on_screen_text or scene.narration_text or ""
 
+    is_portrait = height > width
+
+    # Deduplicate: skip the header badge when the scene label is already
+    # present (or contained) in the body text.
+    label_lower = scene_label.lower().strip()
+    body_lower = body_text.lower().strip()
+    show_header = label_lower not in body_lower and body_lower not in label_lower
+
     if scene_type_key == "intro":
         # Centred large title layout
-        card_x0, card_y0 = int(width * 0.08), int(height * 0.2)
-        card_x1, card_y1 = int(width * 0.92), int(height * 0.8)
-        _draw_rounded_rect(ov_draw, (card_x0, card_y0, card_x1, card_y1), radius=24, fill=(0, 0, 0, 160))
+        if is_portrait:
+            card_x0, card_y0 = int(width * 0.04), int(height * 0.35)
+            card_x1, card_y1 = int(width * 0.96), int(height * 0.90)
+        else:
+            card_x0, card_y0 = int(width * 0.08), int(height * 0.2)
+            card_x1, card_y1 = int(width * 0.92), int(height * 0.8)
+        _draw_rounded_rect(ov_draw, (card_x0, card_y0, card_x1, card_y1), radius=24, fill=(0, 0, 0, card_alpha))
 
         # Title label
         label_bbox = title_font.getbbox(scene_label)
@@ -250,9 +262,13 @@ def create_scene_image(
 
     elif scene_type_key == "outro":
         # Call-to-action style layout
-        card_x0, card_y0 = int(width * 0.06), int(height * 0.15)
-        card_x1, card_y1 = int(width * 0.94), int(height * 0.85)
-        _draw_rounded_rect(ov_draw, (card_x0, card_y0, card_x1, card_y1), radius=24, fill=(0, 0, 0, 150))
+        if is_portrait:
+            card_x0, card_y0 = int(width * 0.04), int(height * 0.35)
+            card_x1, card_y1 = int(width * 0.96), int(height * 0.90)
+        else:
+            card_x0, card_y0 = int(width * 0.06), int(height * 0.15)
+            card_x1, card_y1 = int(width * 0.94), int(height * 0.85)
+        _draw_rounded_rect(ov_draw, (card_x0, card_y0, card_x1, card_y1), radius=24, fill=(0, 0, 0, card_alpha))
 
         # Accent bar at top of card
         ov_draw.rounded_rectangle([card_x0, card_y0, card_x1, card_y0 + int(8 * scale)],
@@ -275,22 +291,37 @@ def create_scene_image(
 
     else:
         # Card-based layout for content scenes
-        card_x0, card_y0 = int(width * 0.05), int(height * 0.1)
-        card_x1, card_y1 = int(width * 0.95), int(height * 0.9)
-        _draw_rounded_rect(ov_draw, (card_x0, card_y0, card_x1, card_y1), radius=20, fill=(0, 0, 0, 140))
+        if is_portrait:
+            card_x0, card_y0 = int(width * 0.04), int(height * 0.42)
+            card_x1, card_y1 = int(width * 0.96), int(height * 0.92)
+        else:
+            card_x0, card_y0 = int(width * 0.05), int(height * 0.1)
+            card_x1, card_y1 = int(width * 0.95), int(height * 0.9)
+        _draw_rounded_rect(ov_draw, (card_x0, card_y0, card_x1, card_y1), radius=20, fill=(0, 0, 0, card_alpha))
 
-        # Header strip
-        header_y1 = card_y0 + int(90 * scale)
-        _draw_rounded_rect(ov_draw, (card_x0, card_y0, card_x1, header_y1), radius=20, fill=(0, 100, 200, 180))
+        if show_header:
+            # Header strip
+            header_y1 = card_y0 + int(90 * scale)
+            _draw_rounded_rect(ov_draw, (card_x0, card_y0, card_x1, header_y1), radius=20, fill=(0, 100, 200, 180))
 
-        label_bbox = title_font.getbbox(scene_label)
-        label_y = card_y0 + (int(90 * scale) - (label_bbox[3] - label_bbox[1])) // 2
-        ov_draw.text((card_x0 + padding, label_y), scene_label, fill=(255, 255, 255, 255), font=title_font)
+            # Truncate scene label to fit within the header
+            max_label_w = card_x1 - card_x0 - padding * 2
+            label_text = scene_label
+            while title_font.getbbox(label_text)[2] > max_label_w and len(label_text) > 3:
+                label_text = label_text[:-4] + "…"
+
+            label_bbox = title_font.getbbox(label_text)
+            label_y = card_y0 + (int(90 * scale) - (label_bbox[3] - label_bbox[1])) // 2
+            ov_draw.text((card_x0 + padding, label_y), label_text, fill=(255, 255, 255, 255), font=title_font)
+
+            body_top = header_y1
+        else:
+            body_top = card_y0
 
         # Body text left-aligned
         inner_w = card_x1 - card_x0 - padding * 2
         lines = _wrap_text(body_text, body_font, inner_w)
-        text_y = header_y1 + int(40 * scale)
+        text_y = body_top + int(40 * scale)
         for line in lines:
             ov_draw.text((card_x0 + padding, text_y), line, fill=(220, 235, 255, 245), font=body_font)
             text_y += body_font_size + int(14 * scale)

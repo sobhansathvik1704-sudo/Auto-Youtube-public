@@ -3,6 +3,8 @@ from pathlib import Path
 
 from google.cloud import texttospeech
 
+from app.core.config import get_settings
+
 logger = logging.getLogger(__name__)
 
 # Map from application language_mode values to BCP-47 language codes used by
@@ -21,9 +23,43 @@ _LANGUAGE_CODE_MAP: dict[str, str] = {
 
 _DEFAULT_LANGUAGE_CODE = "en-US"
 
+# Best voices per language — ordered by quality (Neural2 > WaveNet > Standard)
+# These are the most natural-sounding voices for YouTube narration.
+_VOICE_PREFERENCES: dict[str, list[str]] = {
+    # Indian English — great for Telugu+English code-switching
+    "en-IN": [
+        "en-IN-Neural2-D",      # Female, very natural
+        "en-IN-Neural2-A",      # Female, clear and warm
+        "en-IN-Neural2-B",      # Male, conversational
+        "en-IN-Neural2-C",      # Male, authoritative
+        "en-IN-Wavenet-D",      # Female fallback
+        "en-IN-Wavenet-B",      # Male fallback
+    ],
+    # American English — best overall quality
+    "en-US": [
+        "en-US-Neural2-D",      # Male, warm and natural — best for tech narration
+        "en-US-Neural2-J",      # Male, conversational
+        "en-US-Neural2-E",      # Female, clear and engaging
+        "en-US-Neural2-C",      # Female, warm
+        "en-US-Neural2-F",      # Female, gentle
+        "en-US-Neural2-A",      # Male, authoritative
+        "en-US-Wavenet-D",      # Male fallback
+        "en-US-Wavenet-F",      # Female fallback
+    ],
+    # Telugu
+    "te-IN": [
+        "te-IN-Standard-A",    # Female
+        "te-IN-Standard-B",    # Male
+    ],
+}
+
 
 class TTSClient:
-    """Google Cloud Text-to-Speech client for generating voiceover audio.
+    """Google Cloud Text-to-Speech client with Neural2 voice support.
+
+    Uses the highest quality voices available for natural, human-like narration
+    optimized for YouTube content. Falls back gracefully through voice quality
+    tiers if the preferred voice is unavailable.
 
     Authentication is handled automatically by the Google Cloud client library
     using the ``GOOGLE_APPLICATION_CREDENTIALS`` environment variable, which
@@ -32,9 +68,13 @@ class TTSClient:
 
     def __init__(self) -> None:
         self._client = texttospeech.TextToSpeechClient()
+        self._settings = get_settings()
 
     def synthesize_speech(self, text: str, language: str, output_path: Path) -> Path:
-        """Convert *text* to an MP3 audio file at *output_path*.
+        """Convert *text* to a high-quality MP3 audio file at *output_path*.
+
+        Uses Neural2 voices for near-human narration quality, with automatic
+        fallback to WaveNet and Standard voices if needed.
 
         Args:
             text: The narration text to convert to speech.
@@ -46,30 +86,36 @@ class TTSClient:
             The resolved path to the generated MP3 file.
 
         Raises:
-            google.api_core.exceptions.GoogleAPIError: If the API call fails.
+            google.api_core.exceptions.GoogleAPIError: If the API call fails
+                and all fallback voices are exhausted.
         """
         language_code = _LANGUAGE_CODE_MAP.get(language.lower(), _DEFAULT_LANGUAGE_CODE)
 
         synthesis_input = texttospeech.SynthesisInput(text=text)
-        voice = texttospeech.VoiceSelectionParams(
-            language_code=language_code,
-            ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL,
-        )
+
+        # Build voice selection — try configured voice, then best available
+        voice = self._select_voice(language_code)
+
+        # YouTube-optimized audio config
         audio_config = texttospeech.AudioConfig(
             audio_encoding=texttospeech.AudioEncoding.MP3,
+            speaking_rate=self._settings.tts_speaking_rate,  # Configurable pace
+            pitch=0.0,               # Natural pitch (-20.0 to 20.0)
+            # Audio effects profile optimized for video/headphone playback
+            effects_profile_id=["headphone-class-device"],
         )
 
         logger.info(
-            "Synthesizing speech: language_code=%s, text_length=%d, output=%s",
+            "Synthesizing speech: voice=%s, language_code=%s, text_length=%d, output=%s",
+            voice.name or "auto",
             language_code,
             len(text),
             output_path,
         )
 
-        response = self._client.synthesize_speech(
-            input=synthesis_input,
-            voice=voice,
-            audio_config=audio_config,
+        # Try with preferred voice, fall back on error
+        response = self._synthesize_with_fallback(
+            synthesis_input, voice, audio_config, language_code
         )
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -79,3 +125,97 @@ class TTSClient:
             "Saved TTS audio to %s (%d bytes)", output_path, len(response.audio_content)
         )
         return output_path
+
+    def _select_voice(self, language_code: str) -> texttospeech.VoiceSelectionParams:
+        """Select the best voice for the given language.
+
+        Priority:
+        1. User-configured voice name (TTS_VOICE setting, if it looks like a named voice)
+        2. First voice in the preference list for this language
+        3. Generic fallback with NEUTRAL gender
+        """
+        configured_voice = self._settings.tts_voice
+
+        # If user configured a specific named voice (e.g., "en-US-Neural2-D")
+        if configured_voice and "-" in configured_voice and configured_voice.count("-") >= 2:
+            logger.debug("Using configured TTS voice: %s", configured_voice)
+            return texttospeech.VoiceSelectionParams(
+                language_code=language_code,
+                name=configured_voice,
+            )
+
+        # Use the best voice from our preference list
+        preferences = _VOICE_PREFERENCES.get(language_code, [])
+        if preferences:
+            voice_name = preferences[0]
+            logger.debug("Using preferred voice: %s for language %s", voice_name, language_code)
+            return texttospeech.VoiceSelectionParams(
+                language_code=language_code,
+                name=voice_name,
+            )
+
+        # Generic fallback
+        return texttospeech.VoiceSelectionParams(
+            language_code=language_code,
+            ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL,
+        )
+
+    def _synthesize_with_fallback(
+        self,
+        synthesis_input: texttospeech.SynthesisInput,
+        voice: texttospeech.VoiceSelectionParams,
+        audio_config: texttospeech.AudioConfig,
+        language_code: str,
+    ) -> texttospeech.SynthesizeSpeechResponse:
+        """Try synthesis with the preferred voice, falling back through alternatives."""
+
+        # First try: preferred voice
+        try:
+            return self._client.synthesize_speech(
+                input=synthesis_input,
+                voice=voice,
+                audio_config=audio_config,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Preferred voice %s failed: %s — trying fallback voices",
+                voice.name,
+                exc,
+            )
+
+        # Try each fallback voice in the preference list
+        preferences = _VOICE_PREFERENCES.get(language_code, [])
+        tried_voice = voice.name
+        for fallback_name in preferences:
+            if fallback_name == tried_voice:
+                continue
+            try:
+                fallback_voice = texttospeech.VoiceSelectionParams(
+                    language_code=language_code,
+                    name=fallback_name,
+                )
+                response = self._client.synthesize_speech(
+                    input=synthesis_input,
+                    voice=fallback_voice,
+                    audio_config=audio_config,
+                )
+                logger.info("Successfully used fallback voice: %s", fallback_name)
+                return response
+            except Exception as exc:
+                logger.debug("Fallback voice %s failed: %s", fallback_name, exc)
+
+        # Last resort: generic voice without specific name
+        logger.warning("All named voices failed for %s, using generic fallback", language_code)
+        generic_voice = texttospeech.VoiceSelectionParams(
+            language_code=language_code,
+            ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL,
+        )
+        # Remove effects profile for maximum compatibility
+        basic_audio_config = texttospeech.AudioConfig(
+            audio_encoding=texttospeech.AudioEncoding.MP3,
+        )
+        return self._client.synthesize_speech(
+            input=synthesis_input,
+            voice=generic_voice,
+            audio_config=basic_audio_config,
+        )

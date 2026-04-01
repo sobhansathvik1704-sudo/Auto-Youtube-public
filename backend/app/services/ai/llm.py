@@ -4,6 +4,7 @@ import logging
 from openai import OpenAI, OpenAIError
 
 from app.core.config import get_settings
+from app.services.ai.domain_rules import build_domain_context
 from app.services.ai.prompts import SCRIPT_SYSTEM_PROMPT, SCRIPT_USER_PROMPT_TEMPLATE
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ class LLMClient:
         language: str,
         duration_seconds: int = _DEFAULT_DURATION_SECONDS,
         audience_level: str = "beginner",
+        subcategory: str | None = None,
     ) -> dict:
         """Call the OpenAI API and return a structured script payload dict.
 
@@ -40,6 +42,7 @@ class LLMClient:
             language: Language mode – "telugu_english", "english", or "telugu".
             duration_seconds: Approximate target video duration in seconds.
             audience_level: Target audience expertise (e.g. "beginner", "intermediate").
+            subcategory: Optional subcategory within the niche (e.g. "Operating Systems").
 
         Returns:
             A dict matching the script JSON schema defined in prompts.py.
@@ -48,12 +51,15 @@ class LLMClient:
             OpenAIError: If the API call fails.
             ValueError: If the API response cannot be parsed as valid JSON.
         """
+        domain_context = build_domain_context(niche, subcategory)
         user_prompt = SCRIPT_USER_PROMPT_TEMPLATE.format(
             topic=topic,
             niche=niche,
+            subcategory=subcategory or "General",
             language=language,
             duration_seconds=duration_seconds,
             audience_level=audience_level,
+            domain_context=domain_context,
         )
 
         logger.info(

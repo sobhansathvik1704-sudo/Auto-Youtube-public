@@ -15,6 +15,7 @@ def generate_and_store_script(db: Session, job: VideoJob) -> Script:
         audience_level=job.audience_level,
         language_mode=job.language_mode,
         duration_seconds=job.duration_seconds,
+        subcategory=job.subcategory,
     )
 
     script = Script(

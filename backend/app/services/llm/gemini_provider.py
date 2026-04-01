@@ -60,16 +60,21 @@ class GeminiLLMProvider(BaseLLMProvider):
         audience_level: str,
         language_mode: str,
         duration_seconds: int,
+        subcategory: str | None = None,
     ) -> dict:
+        from app.services.ai.domain_rules import build_domain_context  # noqa: PLC0415
         from app.services.ai.prompts import SCRIPT_SYSTEM_PROMPT, SCRIPT_USER_PROMPT_TEMPLATE  # noqa: PLC0415
         from google.genai import types  # noqa: PLC0415
 
+        domain_context = build_domain_context(category, subcategory)
         user_prompt = SCRIPT_USER_PROMPT_TEMPLATE.format(
             topic=topic,
             niche=category,
+            subcategory=subcategory or "General",
             language=language_mode,
             duration_seconds=duration_seconds,
             audience_level=audience_level,
+            domain_context=domain_context,
         )
 
         full_prompt = f"{SCRIPT_SYSTEM_PROMPT}\n\n{user_prompt}"
@@ -112,7 +117,8 @@ class GeminiLLMProvider(BaseLLMProvider):
                             "Falling back to local templates."
                         )
                         return self._local_fallback(
-                            topic, category, audience_level, language_mode, duration_seconds
+                            topic, category, audience_level, language_mode, duration_seconds,
+                            subcategory,
                         )
 
                     retry_delay = _parse_retry_seconds(error_str)
@@ -133,11 +139,11 @@ class GeminiLLMProvider(BaseLLMProvider):
                 _MAX_RETRIES,
                 last_exc,
             )
-            return self._local_fallback(topic, category, audience_level, language_mode, duration_seconds)
+            return self._local_fallback(topic, category, audience_level, language_mode, duration_seconds, subcategory)
 
         if last_exc is not None and not raw_content:
             logger.error("Gemini provider error: %s — falling back to local templates", last_exc)
-            return self._local_fallback(topic, category, audience_level, language_mode, duration_seconds)
+            return self._local_fallback(topic, category, audience_level, language_mode, duration_seconds, subcategory)
 
         logger.debug("Raw Gemini response: %s", raw_content)
 
@@ -155,7 +161,7 @@ class GeminiLLMProvider(BaseLLMProvider):
                 raw_content,
                 exc,
             )
-            return self._local_fallback(topic, category, audience_level, language_mode, duration_seconds)
+            return self._local_fallback(topic, category, audience_level, language_mode, duration_seconds, subcategory)
 
         self._normalise_payload(payload, topic, category, language_mode, duration_seconds)
         return payload
@@ -217,6 +223,7 @@ class GeminiLLMProvider(BaseLLMProvider):
         audience_level: str,
         language_mode: str,
         duration_seconds: int,
+        subcategory: str | None = None,
     ) -> dict:
         from app.services.llm.local_provider import LocalLLMProvider  # noqa: PLC0415
 
@@ -226,4 +233,5 @@ class GeminiLLMProvider(BaseLLMProvider):
             audience_level=audience_level,
             language_mode=language_mode,
             duration_seconds=duration_seconds,
+            subcategory=subcategory,
         )

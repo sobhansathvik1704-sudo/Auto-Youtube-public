@@ -15,6 +15,7 @@ class OpenAILLMProvider(BaseLLMProvider):
         audience_level: str,
         language_mode: str,
         duration_seconds: int,
+        subcategory: str | None = None,
     ) -> dict:
         return self._client.generate_script_from_topic(
             topic=topic,
@@ -22,4 +23,5 @@ class OpenAILLMProvider(BaseLLMProvider):
             language=language_mode,
             duration_seconds=duration_seconds,
             audience_level=audience_level,
+            subcategory=subcategory,
         )

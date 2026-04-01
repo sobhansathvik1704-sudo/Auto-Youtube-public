@@ -8,14 +8,113 @@ import { isAuthenticated, removeToken } from "@/lib/auth";
 
 const CATEGORIES = [
   { value: "tech", label: "Tech" },
-  { value: "education", label: "Education" },
-  { value: "entertainment", label: "Entertainment" },
   { value: "finance", label: "Finance" },
-  { value: "health", label: "Health" },
-  { value: "lifestyle", label: "Lifestyle" },
+  { value: "education", label: "Education" },
   { value: "science", label: "Science" },
+  { value: "history", label: "History" },
+  { value: "health", label: "Health" },
+  { value: "motivation", label: "Motivation" },
+  { value: "business", label: "Business" },
+  { value: "entertainment", label: "Entertainment" },
   { value: "gaming", label: "Gaming" },
+  { value: "lifestyle", label: "Lifestyle" },
 ];
+
+const SUBCATEGORIES: Record<string, string[]> = {
+  tech: [
+    "Programming",
+    "Web Development",
+    "Operating Systems",
+    "AI / ML",
+    "DevOps / Cloud",
+    "Databases",
+    "Cybersecurity",
+    "Networking",
+    "System Design",
+    "Mobile Development",
+  ],
+  finance: [
+    "Investing",
+    "Budgeting",
+    "Trading",
+    "Economics",
+    "Personal Finance",
+    "Crypto",
+    "Real Estate",
+  ],
+  education: [
+    "Physics",
+    "Chemistry",
+    "Biology",
+    "Mathematics",
+    "General Science",
+    "History",
+    "Geography",
+    "Literature",
+  ],
+  science: [
+    "Physics",
+    "Chemistry",
+    "Biology",
+    "Astronomy",
+    "Earth Science",
+    "Environmental Science",
+  ],
+  history: [
+    "Ancient History",
+    "Medieval History",
+    "Modern History",
+    "Wars & Conflicts",
+    "Biographies",
+    "Civilizations",
+  ],
+  health: [
+    "Fitness",
+    "Nutrition",
+    "Mental Health",
+    "Medical Basics",
+    "Wellness",
+    "Sleep & Recovery",
+  ],
+  motivation: [
+    "Productivity",
+    "Mindset",
+    "Habits",
+    "Discipline",
+    "Communication",
+    "Personal Growth",
+  ],
+  business: [
+    "Startups",
+    "Marketing",
+    "Leadership",
+    "Career",
+    "Freelancing",
+    "Interview Prep",
+  ],
+  entertainment: [
+    "Movies",
+    "Anime",
+    "Gaming",
+    "Pop Culture",
+    "Music",
+    "Storytelling",
+  ],
+  gaming: [
+    "Game Reviews",
+    "Esports",
+    "Game Development",
+    "Game Guides",
+    "Gaming History",
+  ],
+  lifestyle: [
+    "Travel",
+    "Food",
+    "Fashion",
+    "Home & Decor",
+    "Relationships",
+  ],
+};
 
 const AUDIENCE_LEVELS = [
   { value: "beginner", label: "Beginner" },
@@ -50,6 +149,7 @@ export default function Home() {
   const [projectId, setProjectId] = useState("");
   const [topic, setTopic] = useState("");
   const [category, setCategory] = useState("tech");
+  const [subcategory, setSubcategory] = useState<string>("");
   const [audienceLevel, setAudienceLevel] = useState("beginner");
   const [videoFormat, setVideoFormat] = useState("short");
   const [duration, setDuration] = useState(60);
@@ -57,6 +157,11 @@ export default function Home() {
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState("");
   const [avatarMode, setAvatarMode] = useState("static");
+
+  // Reset subcategory when category changes
+  useEffect(() => {
+    setSubcategory("");
+  }, [category]);
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -98,6 +203,7 @@ export default function Home() {
         project_id: projectId,
         topic,
         category,
+        subcategory: subcategory || null,
         audience_level: audienceLevel,
         video_format: videoFormat,
         duration_seconds: duration,
@@ -113,6 +219,8 @@ export default function Home() {
       );
     }
   }
+
+  const availableSubcategories = SUBCATEGORIES[category] ?? [];
 
   return (
     <main className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex flex-col items-center justify-center px-4 py-12">
@@ -168,6 +276,30 @@ export default function Home() {
                 ))}
               </select>
             </div>
+
+            {availableSubcategories.length > 0 && (
+              <div className="flex flex-col gap-1">
+                <label htmlFor="subcategory" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                  Subcategory <span className="text-zinc-400 dark:text-zinc-500 font-normal">(optional — improves visuals)</span>
+                </label>
+                <select
+                  id="subcategory"
+                  value={subcategory}
+                  onChange={(e) => setSubcategory(e.target.value)}
+                  className={selectClass}
+                >
+                  <option value="">— Select subcategory —</option>
+                  {availableSubcategories.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+                {subcategory && (
+                  <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-0.5">
+                    ✓ Scripts and visuals will be tailored for <strong>{subcategory}</strong>
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className="flex flex-col gap-1">
               <label htmlFor="audienceLevel" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
@@ -292,3 +424,4 @@ export default function Home() {
     </main>
   );
 }
+

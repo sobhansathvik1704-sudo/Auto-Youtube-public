@@ -33,6 +33,7 @@ export interface VideoJob {
   project_id: string;
   topic: string;
   category: string;
+  subcategory: string | null;
   audience_level: string;
   language_mode: string;
   video_format: string;
@@ -51,6 +52,7 @@ export interface VideoJobCreatePayload {
   project_id: string;
   topic: string;
   category?: string;
+  subcategory?: string | null;
   audience_level?: string;
   language_mode?: string;
   video_format?: string;

@@ -7,6 +7,20 @@ from app.db.models.script import Script
 from app.db.models.video_job import VideoJob
 
 
+def _build_visual_prompt(subject: str, topic: str) -> str:
+    """Build an image generation prompt focused on the topic and subject matter.
+
+    Deliberately avoids scene-type labels (e.g. 'bullet', 'intro') so image
+    generators produce visuals relevant to the actual content rather than
+    literal interpretations of internal scene names.
+    """
+    return (
+        f"{topic}, {subject}, "
+        "high quality, dramatic lighting, 4K, cinematic, professional photography, "
+        "no text, no letters, no watermarks"
+    )
+
+
 def _scene_type_for_index(index: int, total: int, has_code: bool = False) -> str:
     """Return the scene type for a 1-based scene index out of *total* scenes.
 
@@ -55,10 +69,7 @@ def generate_scenes_from_script(db: Session, job: VideoJob, script: Script) -> l
             scene_type=scene_type,
             narration_text=segment["narration"],
             on_screen_text=segment.get("on_screen_text"),
-            visual_prompt=(
-                f"Cinematic {scene_type.replace('_', ' ')} scene about {scene_subject},"
-                f" topic: {job.topic}, dramatic lighting, professional"
-            ),
+            visual_prompt=_build_visual_prompt(scene_subject, job.topic),
             asset_config_json=json.dumps(asset_config, ensure_ascii=False),
             duration_ms=duration_ms,
             start_ms=current_ms,

@@ -214,6 +214,43 @@ def upload_to_youtube(self, job_id: str) -> dict:
         db.close()
 
 
+# How much extra time (ms) to add after narration ends before the next cut.
+_NARRATION_BUFFER_MS = 400
+# Minimum scene duration (ms) to avoid flash-cuts.
+_MIN_SCENE_DURATION_MS = 2000
+
+
+def _get_audio_duration_ms(audio_path: Path) -> int:
+    """Return the duration of *audio_path* in milliseconds using ffprobe.
+
+    Returns 0 when ffprobe is unavailable or the file cannot be probed.
+    """
+    settings = get_settings()
+    # Derive the ffprobe binary from the configured ffmpeg binary path.
+    ffmpeg_bin = settings.ffmpeg_bin
+    ffprobe_bin = ffmpeg_bin.replace("ffmpeg", "ffprobe") if "ffmpeg" in ffmpeg_bin else "ffprobe"
+    try:
+        result = subprocess.run(
+            [
+                ffprobe_bin,
+                "-v", "quiet",
+                "-show_entries", "format=duration",
+                "-of", "csv=p=0",
+                str(audio_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        stripped = result.stdout.strip()
+        if not stripped:
+            return 0
+        return int(float(stripped) * 1000)
+    except Exception as exc:
+        logger.warning("Could not measure audio duration for %s: %s", audio_path, exc)
+        return 0
+
+
 def _concatenate_audio(scene_audio_paths: list[Path], output_path: Path) -> None:
     """Concatenate multiple MP3 clips into a single output file using FFmpeg."""
     settings = get_settings()
@@ -454,6 +491,34 @@ def render_video_job(self, job_id: str) -> None:
                 output_path=scene_audio_path,
             )
             scene_audio_paths.append(scene_audio_path)
+
+        # --- Sync scene durations to actual TTS audio lengths ---------------
+        # Measure each per-scene audio file and update duration_ms so that the
+        # video renderer keeps each slide on screen for exactly as long as the
+        # narration plays (plus a small breathing-room buffer).
+        updated_start_ms = 0
+        for scene, audio_path in zip(scene_rows, scene_audio_paths):
+            audio_duration_ms = _get_audio_duration_ms(audio_path)
+            if audio_duration_ms > 0:
+                new_duration = max(
+                    _MIN_SCENE_DURATION_MS,
+                    audio_duration_ms + _NARRATION_BUFFER_MS,
+                )
+            else:
+                # ffprobe failed — keep original duration if it is reasonable
+                new_duration = max(_MIN_SCENE_DURATION_MS, scene.duration_ms)
+            scene.duration_ms = new_duration
+            scene.start_ms = updated_start_ms
+            scene.end_ms = updated_start_ms + new_duration
+            updated_start_ms += new_duration
+            db.add(scene)
+        db.commit()
+        logger.info(
+            "Updated scene timings for job %s: %d scenes, total %d ms",
+            job_id, len(scene_rows), updated_start_ms,
+        )
+        # --------------------------------------------------------------------
+
         audio_output = audio_dir / "narration.mp3"
         _concatenate_audio(scene_audio_paths, audio_output)
         db.add(

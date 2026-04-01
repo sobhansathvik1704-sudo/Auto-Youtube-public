@@ -41,6 +41,7 @@ def create_video_job(
         project_id=payload.project_id,
         topic=payload.topic,
         category=payload.category,
+        subcategory=payload.subcategory,
         audience_level=payload.audience_level,
         language_mode=payload.language_mode,
         video_format=payload.video_format,

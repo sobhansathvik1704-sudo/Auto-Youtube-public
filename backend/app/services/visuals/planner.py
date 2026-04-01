@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.db.models.scene import Scene
 from app.db.models.script import Script
 from app.db.models.video_job import VideoJob
+from app.services.ai.domain_rules import get_domain_rules
 
 # Mapping of topic keyword groups → preferred visual vocabulary.
 # Each entry is (keywords_list, preferred_vocabulary_string).
@@ -113,7 +114,8 @@ _CONCEPT_GROUNDING_KEYWORDS = frozenset([
     "terminal", "process", "code", "shell", "diagram", "command", "screen",
     "window", "script", "compiler", "source", "signal", "kill", "pid",
     "htop", "top", "ps", "tree", "socket", "packet", "sql", "git",
-    "docker", "container", "algorithm", "flowchart",
+    "docker", "container", "algorithm", "flowchart", "chart", "graph",
+    "map", "illustration", "budget", "timeline",
 ])
 
 # Pre-compiled word-boundary patterns for grounding keyword detection.
@@ -142,7 +144,12 @@ def _detect_topic_vocabulary(topic: str) -> str | None:
     return None
 
 
-def _build_visual_prompt(segment: dict, topic: str) -> str:
+def _build_visual_prompt(
+    segment: dict,
+    topic: str,
+    category: str = "",
+    subcategory: str | None = None,
+) -> str:
     """Build an image generation prompt for a segment.
 
     Prefers the segment's ``visual_concept`` field (set by the LLM) over a
@@ -150,9 +157,28 @@ def _build_visual_prompt(segment: dict, topic: str) -> str:
     Injects topic-specific vocabulary when the LLM concept is not already
     grounded in technical terminology, and appends negative keywords to prevent
     generic finance/corridor/portrait imagery.
+
+    Category/subcategory domain rules are used as a secondary vocabulary source
+    when neither the topic keyword lookup nor the LLM concept itself provides
+    adequate grounding.
     """
     visual_concept = (segment.get("visual_concept") or "").strip()
+
+    # Fetch domain rules once and reuse
+    domain_rules = get_domain_rules(category, subcategory) if category else None
+
+    # 1. Try topic-keyword vocabulary (most specific)
     topic_vocab = _detect_topic_vocabulary(topic)
+
+    # 2. Fall back to category/subcategory domain rules vocabulary
+    if not topic_vocab and domain_rules:
+        topic_vocab = domain_rules.visual_vocab
+
+    # Build domain-specific negative keywords
+    domain_avoid = domain_rules.avoid_visuals if domain_rules else ""
+    combined_negative = _NEGATIVE_KEYWORDS
+    if domain_avoid:
+        combined_negative = f"{_NEGATIVE_KEYWORDS}, {domain_avoid}"
 
     if visual_concept:
         # Check if the concept already contains any grounding keyword using
@@ -165,14 +191,14 @@ def _build_visual_prompt(segment: dict, topic: str) -> str:
             base = f"{visual_concept}, {topic_vocab}"
         else:
             base = visual_concept
-        return f"{base}, {_QUALITY_MODIFIERS}, {_NEGATIVE_KEYWORDS}"
+        return f"{base}, {_QUALITY_MODIFIERS}, {combined_negative}"
 
     # Fallback: derive from on_screen_text / topic
     subject = (segment.get("on_screen_text") or "").strip() or topic
     vocab_part = f", {topic_vocab}" if topic_vocab else ""
     return (
         f"{topic}, {subject}{vocab_part}, "
-        f"{_QUALITY_MODIFIERS}, {_NEGATIVE_KEYWORDS}"
+        f"{_QUALITY_MODIFIERS}, {combined_negative}"
     )
 
 
@@ -236,7 +262,9 @@ def generate_scenes_from_script(db: Session, job: VideoJob, script: Script) -> l
             scene_type=scene_type,
             narration_text=segment["narration"],
             on_screen_text=segment.get("on_screen_text"),
-            visual_prompt=_build_visual_prompt(segment, job.topic),
+            visual_prompt=_build_visual_prompt(
+                segment, job.topic, job.category, job.subcategory
+            ),
             asset_config_json=json.dumps(asset_config, ensure_ascii=False),
             duration_ms=duration_ms,
             start_ms=current_ms,

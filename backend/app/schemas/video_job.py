@@ -9,6 +9,7 @@ class VideoJobCreate(BaseModel):
     project_id: str
     topic: str = Field(min_length=3, max_length=500)
     category: str = Field(default="tech", max_length=100)
+    subcategory: str | None = Field(default=None, max_length=100)
     audience_level: str = Field(default="beginner", max_length=50)
     language_mode: str = Field(default="te-en", max_length=20)
     video_format: str = Field(default="short", max_length=20)
@@ -21,6 +22,7 @@ class VideoJobRead(ORMBase):
     project_id: str
     topic: str
     category: str
+    subcategory: str | None
     audience_level: str
     language_mode: str
     video_format: str

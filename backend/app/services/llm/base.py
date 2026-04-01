@@ -10,5 +10,6 @@ class BaseLLMProvider(ABC):
         audience_level: str,
         language_mode: str,
         duration_seconds: int,
+        subcategory: str | None = None,
     ) -> dict:
         raise NotImplementedError

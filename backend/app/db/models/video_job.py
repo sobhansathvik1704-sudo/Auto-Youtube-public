@@ -16,6 +16,7 @@ class VideoJob(Base):
     )
     topic: Mapped[str] = mapped_column(String(500), nullable=False)
     category: Mapped[str] = mapped_column(String(100), nullable=False, default="tech")
+    subcategory: Mapped[str | None] = mapped_column(String(100), nullable=True)
     audience_level: Mapped[str] = mapped_column(String(50), nullable=False, default="beginner")
     language_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="te-en")
     video_format: Mapped[str] = mapped_column(String(20), nullable=False, default="short")

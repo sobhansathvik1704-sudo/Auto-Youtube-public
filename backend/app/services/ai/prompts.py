@@ -12,6 +12,13 @@ Language modes:
   - "english": Pure English script.
   - "telugu": Pure Telugu script.
 
+DOMAIN-DRIVEN GENERATION:
+The user will provide a Category and optionally a Subcategory.  You MUST use these to shape
+every aspect of the output — script tone, narration style, on-screen text vocabulary, and
+especially the visual_concept for every segment.  The domain context provided in the user
+message is authoritative: follow its preferred visual vocabulary and strictly avoid imagery
+listed under "Avoid these visuals".
+
 You MUST respond with a single valid JSON object. Do NOT include any explanation, markdown fences, or extra text.
 
 The JSON object must follow this exact schema:
@@ -68,29 +75,20 @@ ON-SCREEN TEXT rules ("on_screen_text"):
 
 VISUAL CONCEPT rules ("visual_concept"):
 - MUST describe a specific, concept-matched visual that instantly communicates the educational idea.
-- Match the visual directly to the technical concept being explained in that beat.
-- For Linux / OS / process management topics, use vocabulary such as:
-    linux terminal window, htop or top output, ps aux command listing, PID numbers,
-    process tree with parent-child nodes, CPU scheduler queue, process state diagram
-    (running/sleeping/zombie), kill command, SIGTERM SIGKILL signal flow,
-    nice renice command, /proc filesystem, context switch diagram, shell prompt
-- For programming / compiler topics, use vocabulary such as:
-    source code file in editor, terminal compiler output, assembly listing,
-    object file and linker, binary executable, syntax-highlighted code, dark terminal
-- For networking topics, use vocabulary such as:
-    network topology diagram, packet flow, TCP/IP layer stack,
-    curl or ping command output, socket connection diagram
+- Match the visual directly to the concept being explained AND the domain specified by the user.
+- Use the "Preferred visual vocabulary" from the DOMAIN CONTEXT in the user message.
+- STRICTLY avoid any imagery listed under "Avoid these visuals" in the DOMAIN CONTEXT.
 - AVOID generic or misleading imagery — these make the video look like an unfocused AI slideshow:
   BAD: "bullet explainer", "intro slide", "educational background"
-  BAD: "finance chart", "trading dashboard", "stock market monitor"
+  BAD: "finance chart", "trading dashboard", "stock market monitor" (unless Category is Finance)
   BAD: "vague cyber corridor", "random glowing orbs", "cinematic human portrait"
   BAD: "dramatic cinematic background" with no concept connection
-  GOOD: "htop terminal window showing processes with CPU bars, dark green on black"
-  GOOD: "Linux shell with 'ps aux' output listing PIDs, states, and command names"
-  GOOD: "process state diagram: running → sleeping → zombie transitions, dark background"
-  GOOD: "kill command sending SIGTERM to PID, terminal dark theme"
-  GOOD: "C source code file with #include lines highlighted, terminal dark theme"
-  GOOD: "assembly language instructions on a dark screen, low-level code view"
+  GOOD (Tech/OS): "htop terminal window showing processes with CPU bars, dark green on black"
+  GOOD (Tech/OS): "process state diagram: running → sleeping → zombie transitions, dark background"
+  GOOD (Tech/Programming): "C source code file with #include lines highlighted, terminal dark theme"
+  GOOD (Finance): "compound interest growth curve chart with labeled principal and interest bands"
+  GOOD (History): "ancient Rome map with highlighted trade routes, vintage cartographic style"
+  GOOD (Science): "photosynthesis diagram showing sunlight, chlorophyll, glucose output, labeled"
 
 Other rules:
 - ALWAYS generate exactly 1 hook segment (purpose: "hook") + 3–5 beat segments (purpose: "beat") + 1 takeaway segment (purpose: "takeaway").
@@ -104,10 +102,13 @@ SCRIPT_USER_PROMPT_TEMPLATE = """\
 Generate a YouTube Shorts script for the following:
 
 Topic: {topic}
-Niche/Category: {niche}
+Category: {niche}
+Subcategory: {subcategory}
 Audience Level: {audience_level}
 Language Mode: {language}
 Target Duration: {duration_seconds} seconds
+
+{domain_context}
 
 Return only the JSON object as described.\
 """

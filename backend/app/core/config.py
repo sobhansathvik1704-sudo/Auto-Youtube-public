@@ -44,7 +44,15 @@ class Settings(BaseSettings):
     gemini_model_name: str = "gemini-2.0-flash"
 
     tts_provider: str = "local"
-    tts_voice: str = "te-en-default"
+    tts_voice: str = "en-IN-Neural2-D"  # Best Indian English Neural2 voice for narration
+    tts_speaking_rate: float = 1.0  # Speaking rate (0.25-4.0, 1.0 = normal)
+
+    @field_validator("tts_speaking_rate")
+    @classmethod
+    def validate_tts_speaking_rate(cls, value: float) -> float:
+        if not 0.25 <= value <= 4.0:
+            raise ValueError(f"tts_speaking_rate must be between 0.25 and 4.0, got {value}")
+        return value
 
     video_render_fps: int = 30
     short_video_width: int = 1080

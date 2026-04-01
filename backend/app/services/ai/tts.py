@@ -96,6 +96,11 @@ class TTSClient:
         # Build voice selection — try configured voice, then best available
         voice = self._select_voice(language_code)
 
+        # Use the voice's actual language_code for fallback lookup so that,
+        # e.g., a configured "en-IN-Neural2-B" voice (language_code="en-IN")
+        # falls back through the en-IN preference list instead of en-US.
+        actual_language_code = voice.language_code
+
         # YouTube-optimized audio config
         audio_config = texttospeech.AudioConfig(
             audio_encoding=texttospeech.AudioEncoding.MP3,
@@ -108,14 +113,14 @@ class TTSClient:
         logger.info(
             "Synthesizing speech: voice=%s, language_code=%s, text_length=%d, output=%s",
             voice.name or "auto",
-            language_code,
+            actual_language_code,
             len(text),
             output_path,
         )
 
         # Try with preferred voice, fall back on error
         response = self._synthesize_with_fallback(
-            synthesis_input, voice, audio_config, language_code
+            synthesis_input, voice, audio_config, actual_language_code
         )
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -136,11 +141,14 @@ class TTSClient:
         """
         configured_voice = self._settings.tts_voice
 
-        # If user configured a specific named voice (e.g., "en-US-Neural2-D")
+        # If user configured a specific named voice (e.g., "en-IN-Neural2-B")
         if configured_voice and "-" in configured_voice and configured_voice.count("-") >= 2:
-            logger.debug("Using configured TTS voice: %s", configured_voice)
+            # Extract the language code from the voice name itself so it always
+            # matches: "en-IN-Neural2-B" → "en-IN", "en-US-Neural2-D" → "en-US"
+            voice_lang = "-".join(configured_voice.split("-")[:2])
+            logger.debug("Using configured TTS voice: %s (language: %s)", configured_voice, voice_lang)
             return texttospeech.VoiceSelectionParams(
-                language_code=language_code,
+                language_code=voice_lang,
                 name=configured_voice,
             )
 

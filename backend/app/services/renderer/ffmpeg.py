@@ -83,6 +83,23 @@ def _wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[
     return lines or [""]
 
 
+def _draw_text_with_shadow(
+    draw: ImageDraw.ImageDraw,
+    xy: tuple[int, int],
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    fill: tuple,
+    shadow_offset: int = 2,
+    shadow_fill: tuple = (0, 0, 0, 200),
+) -> None:
+    """Draw *text* at *xy* with a drop-shadow for better readability on photo backgrounds."""
+    sx, sy = xy
+    # Draw shadow first (slightly offset)
+    draw.text((sx + shadow_offset, sy + shadow_offset), text, fill=shadow_fill, font=font)
+    # Draw the main text on top
+    draw.text(xy, text, fill=fill, font=font)
+
+
 _MIN_KEYWORD_LENGTH = 4  # skip words shorter than this when building a Pexels query
 _MAX_KEYWORDS = 4       # maximum number of keywords extracted per scene
 
@@ -155,8 +172,9 @@ def create_scene_image(
             )
         # No code snippet available — fall through to standard card layout below
 
-    # --- Background: try HuggingFace AI first, then Pexels, then gradient ---
+    # --- Background: try HuggingFace AI first, then Pexels, then Pollinations, then gradient ---
     scene_type_key = scene.scene_type.lower() if scene.scene_type else ""
+    visual_prompt = scene.visual_prompt or scene.on_screen_text or scene.narration_text or scene.scene_type or ""
 
     # 1. HuggingFace AI image
     ai_image_path: Path | None = None
@@ -168,9 +186,8 @@ def create_scene_image(
             model=settings.hf_image_model,
             provider=settings.hf_inference_provider,
         )
-        prompt = scene.visual_prompt or scene.on_screen_text or scene.narration_text or scene.scene_type or ""
         ai_tmp = output_path.with_suffix(".ai.png")
-        ai_image_path = hf_provider.generate_image(prompt, ai_tmp)
+        ai_image_path = hf_provider.generate_image(visual_prompt, ai_tmp)
         if ai_image_path is not None:
             try:
                 image = _open_and_fit_image(ai_image_path, width, height)
@@ -182,7 +199,7 @@ def create_scene_image(
 
     # 2. Pexels stock photo (when HuggingFace is not used or failed)
     pexels_path: Path | None = None
-    if ai_image_path is None:
+    if ai_image_path is None and settings.image_provider == "pexels":
         pexels_tmp = output_path.with_suffix(".pexels.jpg")
         pexels_path = _fetch_pexels_background(scene, pexels_tmp)
 
@@ -193,25 +210,47 @@ def create_scene_image(
                 logger.warning("Failed to open Pexels image %s: %s — using gradient", pexels_path, exc)
                 pexels_path = None
 
-    # 3. Gradient fallback
-    if ai_image_path is None and pexels_path is None:
+    # 3. Pollinations.ai (free, no API key required) – used when provider is
+    #    "pollinations", or as automatic fallback when HuggingFace/Pexels fail.
+    pollinations_path: Path | None = None
+    if ai_image_path is None and pexels_path is None and settings.image_provider in ("pollinations", "huggingface", "pexels"):
+        from app.services.images.pollinations_provider import PollinationsImageProvider  # noqa: PLC0415
+
+        poll_provider = PollinationsImageProvider(
+            model=getattr(settings, "pollinations_model", "flux"),
+        )
+        poll_tmp = output_path.with_suffix(".pollinations.jpg")
+        pollinations_path = poll_provider.generate_image(visual_prompt, poll_tmp, width=width, height=height)
+        if pollinations_path is not None:
+            try:
+                image = _open_and_fit_image(pollinations_path, width, height)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to open Pollinations image %s: %s — using gradient", pollinations_path, exc
+                )
+                pollinations_path = None
+
+    # 4. Gradient fallback
+    if ai_image_path is None and pexels_path is None and pollinations_path is None:
         color_top, color_bottom = _GRADIENT_SCHEMES.get(scene_type_key, _DEFAULT_GRADIENT)
         image = Image.new("RGB", (width, height))
         _draw_gradient_background(image, color_top, color_bottom)
 
     # Overlay layer for semi-transparent elements (RGBA composite).
-    # Use a lighter card alpha when a photo background is present so the
-    # AI/Pexels image shows through clearly outside the card area.
+    # Use a lighter (less opaque) card when a photo background is present so the
+    # AI/Pexels/Pollinations image shows through clearly behind the text card.
     overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     ov_draw = ImageDraw.Draw(overlay)
-    has_photo_bg = ai_image_path is not None or pexels_path is not None
-    card_alpha = 100 if has_photo_bg else 160
+    has_photo_bg = ai_image_path is not None or pexels_path is not None or pollinations_path is not None
+    # Photo backgrounds: semi-transparent card (alpha=160) lets the image show through.
+    # Plain gradient backgrounds: more opaque card (alpha=180) for maximum contrast.
+    card_alpha = 160 if has_photo_bg else 180
 
     scale = min(width, height) / 1080  # normalise to shorter dimension
     padding = int(80 * scale)
-    title_font_size = min(int(52 * scale), 64)
-    body_font_size = min(int(28 * scale), 38)
-    small_font_size = min(int(20 * scale), 28)
+    title_font_size = min(int(56 * scale), 68)
+    body_font_size = min(int(32 * scale), 42)
+    small_font_size = min(int(22 * scale), 30)
 
     title_font = _font(title_font_size, bold=True)
     body_font = _font(body_font_size, bold=False)
@@ -255,6 +294,11 @@ def create_scene_image(
             card_x0, card_y0 = int(width * 0.08), int(height * 0.2)
             card_x1, card_y1 = int(width * 0.92), int(height * 0.8)
         _draw_rounded_rect(ov_draw, (card_x0, card_y0, card_x1, card_y1), radius=24, fill=(0, 0, 0, card_alpha))
+        # Accent gradient bar at top
+        ov_draw.rounded_rectangle(
+            [card_x0, card_y0, card_x1, card_y0 + int(6 * scale)],
+            radius=4, fill=(100, 160, 255, 220),
+        )
 
         if show_header:
             # Title label — omitted when it would duplicate the body text
@@ -262,11 +306,12 @@ def create_scene_image(
             label_w = label_bbox[2] - label_bbox[0]
             label_x = (width - label_w) // 2
             label_y = card_y0 + int(40 * scale)
-            ov_draw.text((label_x, label_y), scene_label, fill=(255, 220, 100, 255), font=title_font)
+            _draw_text_with_shadow(ov_draw, (label_x, label_y), scene_label,
+                                   font=title_font, fill=(255, 220, 100, 255))
 
             # Divider line
             div_y = label_y + label_bbox[3] + int(20 * scale)
-            ov_draw.line([(card_x0 + 40, div_y), (card_x1 - 40, div_y)], fill=(255, 255, 255, 100), width=2)
+            ov_draw.line([(card_x0 + 40, div_y), (card_x1 - 40, div_y)], fill=(255, 255, 255, 120), width=2)
             body_top_intro = div_y + int(30 * scale)
         else:
             body_top_intro = card_y0 + int(40 * scale)
@@ -274,13 +319,14 @@ def create_scene_image(
         # Body text centred
         inner_w = card_x1 - card_x0 - padding * 2
         lines = _wrap_text(body_text, body_font, inner_w)
-        total_h = len(lines) * (body_font_size + int(14 * scale))
-        text_y = body_top_intro + ((card_y1 - body_top_intro) - total_h) // 2
+        line_h = body_font_size + int(16 * scale)
+        total_h = len(lines) * line_h
+        text_y = body_top_intro + max(0, ((card_y1 - body_top_intro) - total_h) // 2)
         for line in lines:
             lb = body_font.getbbox(line)
             lx = card_x0 + (card_x1 - card_x0 - (lb[2] - lb[0])) // 2
-            ov_draw.text((lx, text_y), line, fill=(255, 255, 255, 245), font=body_font)
-            text_y += body_font_size + int(14 * scale)
+            _draw_text_with_shadow(ov_draw, (lx, text_y), line, font=body_font, fill=(255, 255, 255, 245))
+            text_y += line_h
 
     elif scene_type_key == "outro":
         # Call-to-action style layout
@@ -302,19 +348,21 @@ def create_scene_image(
             label_w = label_bbox[2] - label_bbox[0]
             label_x = (width - label_w) // 2
             label_y = card_y0 + int(50 * scale)
-            ov_draw.text((label_x, label_y), scene_label, fill=(255, 160, 200, 255), font=title_font)
+            _draw_text_with_shadow(ov_draw, (label_x, label_y), scene_label,
+                                   font=title_font, fill=(255, 160, 200, 255))
             body_top_outro = label_y + label_bbox[3] + int(40 * scale)
         else:
             body_top_outro = card_y0 + int(50 * scale)
 
         inner_w = card_x1 - card_x0 - padding * 2
         lines = _wrap_text(body_text, body_font, inner_w)
+        line_h = body_font_size + int(16 * scale)
         text_y = body_top_outro
         for line in lines:
             lb = body_font.getbbox(line)
             lx = card_x0 + (card_x1 - card_x0 - (lb[2] - lb[0])) // 2
-            ov_draw.text((lx, text_y), line, fill=(255, 255, 255, 245), font=body_font)
-            text_y += body_font_size + int(14 * scale)
+            _draw_text_with_shadow(ov_draw, (lx, text_y), line, font=body_font, fill=(255, 255, 255, 245))
+            text_y += line_h
 
     else:
         # Card-based layout for content scenes (portrait: 45–93% of frame height)
@@ -329,7 +377,7 @@ def create_scene_image(
         if show_header:
             # Header strip — one label badge, shown only when distinct from body
             header_y1 = card_y0 + int(90 * scale)
-            _draw_rounded_rect(ov_draw, (card_x0, card_y0, card_x1, header_y1), radius=20, fill=(0, 100, 200, 180))
+            _draw_rounded_rect(ov_draw, (card_x0, card_y0, card_x1, header_y1), radius=20, fill=(0, 100, 200, 200))
 
             # Truncate scene label to fit within the header
             max_label_w = card_x1 - card_x0 - padding * 2
@@ -339,7 +387,8 @@ def create_scene_image(
 
             label_bbox = title_font.getbbox(label_text)
             label_y = card_y0 + (int(90 * scale) - (label_bbox[3] - label_bbox[1])) // 2
-            ov_draw.text((card_x0 + padding, label_y), label_text, fill=(255, 255, 255, 255), font=title_font)
+            _draw_text_with_shadow(ov_draw, (card_x0 + padding, label_y), label_text,
+                                   font=title_font, fill=(255, 255, 255, 255))
 
             body_top = header_y1
         else:
@@ -348,14 +397,16 @@ def create_scene_image(
         # Single primary text block — no hero/duplicate block beneath it
         inner_w = card_x1 - card_x0 - padding * 2
         lines = _wrap_text(body_text, body_font, inner_w)
+        line_h = body_font_size + int(16 * scale)
         text_y = body_top + int(40 * scale)
         for line in lines:
-            ov_draw.text((card_x0 + padding, text_y), line, fill=(220, 235, 255, 245), font=body_font)
-            text_y += body_font_size + int(14 * scale)
+            _draw_text_with_shadow(ov_draw, (card_x0 + padding, text_y), line,
+                                   font=body_font, fill=(220, 240, 255, 245))
+            text_y += line_h
 
         # Subtle border around card
         ov_draw.rounded_rectangle([card_x0, card_y0, card_x1, card_y1],
-                                   radius=20, outline=(255, 255, 255, 50), width=2)
+                                   radius=20, outline=(255, 255, 255, 70), width=2)
 
     # --- Scene number indicator (top-right corner) ---
     if total_scenes > 0:

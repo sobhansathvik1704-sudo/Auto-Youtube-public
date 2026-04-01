@@ -43,6 +43,13 @@ _TAKEAWAY_TEXT_COLOR: tuple[int, int, int, int] = (80, 255, 160, 255)  # emerald
 _TAKEAWAY_ACCENT_COLOR: tuple[int, int, int, int] = (0, 230, 120, 230) # bright green
 _DEFAULT_GRADIENT = ((30, 60, 130), (20, 130, 160))  # visible blue → teal
 
+# Dynamic font scaling: when on-screen text exceeds this character count the
+# font size is reduced by _LONG_TEXT_FONT_SCALE to keep lines within the safe
+# horizontal zone.  Using a single threshold and scale factor across all scene
+# types ensures consistent visual pacing.
+_LONG_TEXT_THRESHOLD = 30   # characters; phrases ≥ this trigger size reduction
+_LONG_TEXT_FONT_SCALE = 0.80  # scale factor applied to the base font size
+
 
 def _font(size: int, bold: bool = True):
     candidates = [
@@ -115,6 +122,30 @@ def _draw_text_with_shadow(
 
 _MIN_KEYWORD_LENGTH = 4  # skip words shorter than this when building a Pexels query
 _MAX_KEYWORDS = 4       # maximum number of keywords extracted per scene
+# Minimum file size (bytes) for a downloaded image to be considered valid.
+# Files smaller than this are almost certainly error pages or empty responses.
+_MIN_IMAGE_BYTES = 2048
+
+
+def _is_valid_image(path: Path) -> bool:
+    """Return True only when *path* exists, has a meaningful file size, and can
+    be opened as a proper image by Pillow.
+
+    Used to discard corrupted downloads, HTML error-page responses that happen
+    to be saved with a .png/.jpg extension, and suspiciously small files that
+    would render as broken/blank frames.
+    """
+    try:
+        if not path.exists() or path.stat().st_size < _MIN_IMAGE_BYTES:
+            return False
+        # Image.verify() is destructive (it closes the file handle), so we
+        # must re-open if we later need to read pixel data.  Here we just need
+        # the boolean result.
+        with Image.open(path) as img:
+            img.verify()
+        return True
+    except Exception:
+        return False
 
 
 def _extract_search_query(scene: Scene) -> str:
@@ -202,6 +233,13 @@ def create_scene_image(
         ai_tmp = output_path.with_suffix(".ai.png")
         ai_image_path = hf_provider.generate_image(visual_prompt, ai_tmp)
         if ai_image_path is not None:
+            if not _is_valid_image(ai_image_path):
+                logger.warning(
+                    "AI image %s failed validation (too small or corrupt) — trying next provider",
+                    ai_image_path,
+                )
+                ai_image_path = None
+        if ai_image_path is not None:
             try:
                 image = _open_and_fit_image(ai_image_path, width, height)
             except Exception as exc:
@@ -216,6 +254,12 @@ def create_scene_image(
         pexels_tmp = output_path.with_suffix(".pexels.jpg")
         pexels_path = _fetch_pexels_background(scene, pexels_tmp)
 
+        if pexels_path is not None:
+            if not _is_valid_image(pexels_path):
+                logger.warning(
+                    "Pexels image %s failed validation — using next provider", pexels_path,
+                )
+                pexels_path = None
         if pexels_path is not None:
             try:
                 image = _open_and_fit_image(pexels_path, width, height)
@@ -234,6 +278,13 @@ def create_scene_image(
         )
         poll_tmp = output_path.with_suffix(".pollinations.jpg")
         pollinations_path = poll_provider.generate_image(visual_prompt, poll_tmp, width=width, height=height)
+        if pollinations_path is not None:
+            if not _is_valid_image(pollinations_path):
+                logger.warning(
+                    "Pollinations image %s failed validation — using gradient fallback",
+                    pollinations_path,
+                )
+                pollinations_path = None
         if pollinations_path is not None:
             try:
                 image = _open_and_fit_image(pollinations_path, width, height)
@@ -300,6 +351,9 @@ def create_scene_image(
         # HOOK: Bold centred question/statement in the middle of the screen.
         # No card — text sits directly on the AI background with a strong shadow.
         hook_font_size = min(int(72 * scale), 90)
+        # Reduce font for longer hook texts so they stay within safe margins.
+        if len(body_text) > _LONG_TEXT_THRESHOLD:
+            hook_font_size = max(int(hook_font_size * _LONG_TEXT_FONT_SCALE), int(44 * scale))
         hook_font = _font(hook_font_size, bold=True)
 
         # Dark scrim across the whole frame so text pops on any background
@@ -309,7 +363,9 @@ def create_scene_image(
         image = image.convert("RGBA")
         image = Image.alpha_composite(image, scrim)
 
-        inner_w = int(width * 0.88)
+        # Mobile-safe inner width: 82% keeps text clear of rounded-corner
+        # safe zones used by iOS/Android status bars and navigation chrome.
+        inner_w = int(width * 0.82)
         lines = _wrap_text(body_text, hook_font, inner_w)
         line_h = hook_font_size + int(18 * scale)
         total_h = len(lines) * line_h
@@ -336,9 +392,13 @@ def create_scene_image(
         # BEAT: Short phrase in large bold font placed in the lower third.
         # Mobile-safe zone. No card — clean text with shadow over AI background.
         beat_font_size = min(int(64 * scale), 80)
+        # Reduce font for longer beat phrases to avoid overflow on narrow screens.
+        if len(body_text) > _LONG_TEXT_THRESHOLD:
+            beat_font_size = max(int(beat_font_size * _LONG_TEXT_FONT_SCALE), int(36 * scale))
         beat_font = _font(beat_font_size, bold=True)
 
-        inner_w = int(width * 0.90)
+        # Mobile-safe: 82% of frame width keeps text inside safe horizontal zone.
+        inner_w = int(width * 0.82)
         lines = _wrap_text(body_text, beat_font, inner_w)
         line_h = beat_font_size + int(14 * scale)
         total_h = len(lines) * line_h
@@ -351,11 +411,11 @@ def create_scene_image(
             zone_top = int(height * 0.55)
             zone_bottom = int(height * 0.90)
 
-        # Semi-transparent pill behind the text block for readability
-        pill_pad_x = int(28 * scale)
+        # Semi-transparent pill behind the text block for readability.
+        # Pill margins: 8% from each edge keeps it within the mobile safe zone.
         pill_pad_y = int(18 * scale)
-        pill_x0 = int(width * 0.05)
-        pill_x1 = int(width * 0.95)
+        pill_x0 = int(width * 0.08)
+        pill_x1 = int(width * 0.92)
         pill_y0 = zone_top - pill_pad_y
         pill_y1 = zone_top + total_h + pill_pad_y
         _draw_rounded_rect(ov_draw, (pill_x0, pill_y0, pill_x1, pill_y1),
@@ -381,6 +441,9 @@ def create_scene_image(
         # TAKEAWAY: Centred insight phrase with a distinct accent treatment.
         # Acts as the memorable conclusion — uses a bright accent colour.
         take_font_size = min(int(68 * scale), 84)
+        # Reduce font for longer takeaway phrases.
+        if len(body_text) > _LONG_TEXT_THRESHOLD:
+            take_font_size = max(int(take_font_size * _LONG_TEXT_FONT_SCALE), int(36 * scale))
         take_font = _font(take_font_size, bold=True)
 
         # Scrim for contrast
@@ -390,7 +453,8 @@ def create_scene_image(
         image = image.convert("RGBA")
         image = Image.alpha_composite(image, scrim2)
 
-        inner_w = int(width * 0.88)
+        # Mobile-safe inner width.
+        inner_w = int(width * 0.82)
         lines = _wrap_text(body_text, take_font, inner_w)
         line_h = take_font_size + int(16 * scale)
         total_h = len(lines) * line_h
@@ -402,9 +466,9 @@ def create_scene_image(
 
         text_y = area_top + max(0, ((area_bottom - area_top) - total_h) // 2)
 
-        # Pill background
-        pill_x0 = int(width * 0.04)
-        pill_x1 = int(width * 0.96)
+        # Pill background — 8% margin from each edge.
+        pill_x0 = int(width * 0.08)
+        pill_x1 = int(width * 0.92)
         pill_y0 = text_y - int(20 * scale)
         pill_y1 = text_y + total_h + int(20 * scale)
         _draw_rounded_rect(ov_draw, (pill_x0, pill_y0, pill_x1, pill_y1),
@@ -423,10 +487,10 @@ def create_scene_image(
             text_y += line_h
 
     elif scene_type_key == "intro":
-        # Centred large title layout
+        # Centred large title layout — 8% safe margins on each side.
         if is_portrait:
-            card_x0, card_y0 = int(width * 0.04), int(height * 0.35)
-            card_x1, card_y1 = int(width * 0.96), int(height * 0.90)
+            card_x0, card_y0 = int(width * 0.08), int(height * 0.35)
+            card_x1, card_y1 = int(width * 0.92), int(height * 0.90)
         else:
             card_x0, card_y0 = int(width * 0.08), int(height * 0.2)
             card_x1, card_y1 = int(width * 0.92), int(height * 0.8)
@@ -453,7 +517,7 @@ def create_scene_image(
         else:
             body_top_intro = card_y0 + int(40 * scale)
 
-        # Body text centred
+        # Body text centred within the card.
         inner_w = card_x1 - card_x0 - padding * 2
         lines = _wrap_text(body_text, body_font, inner_w)
         line_h = body_font_size + int(16 * scale)
@@ -466,13 +530,13 @@ def create_scene_image(
             text_y += line_h
 
     elif scene_type_key == "outro":
-        # Call-to-action style layout
+        # Call-to-action style layout — 8% safe margins on each side.
         if is_portrait:
-            card_x0, card_y0 = int(width * 0.04), int(height * 0.35)
-            card_x1, card_y1 = int(width * 0.96), int(height * 0.90)
+            card_x0, card_y0 = int(width * 0.08), int(height * 0.35)
+            card_x1, card_y1 = int(width * 0.92), int(height * 0.90)
         else:
-            card_x0, card_y0 = int(width * 0.06), int(height * 0.15)
-            card_x1, card_y1 = int(width * 0.94), int(height * 0.85)
+            card_x0, card_y0 = int(width * 0.08), int(height * 0.15)
+            card_x1, card_y1 = int(width * 0.92), int(height * 0.85)
         _draw_rounded_rect(ov_draw, (card_x0, card_y0, card_x1, card_y1), radius=24, fill=(0, 0, 0, card_alpha))
 
         # Accent bar at top of card
@@ -502,13 +566,14 @@ def create_scene_image(
             text_y += line_h
 
     else:
-        # Card-based layout for content scenes (portrait: 45–93% of frame height)
+        # Card-based layout for content scenes.
+        # Portrait: 8% safe margin on each side, centred text for polish.
         if is_portrait:
-            card_x0, card_y0 = int(width * 0.04), int(height * 0.45)
-            card_x1, card_y1 = int(width * 0.96), int(height * 0.93)
+            card_x0, card_y0 = int(width * 0.08), int(height * 0.45)
+            card_x1, card_y1 = int(width * 0.92), int(height * 0.93)
         else:
-            card_x0, card_y0 = int(width * 0.05), int(height * 0.1)
-            card_x1, card_y1 = int(width * 0.95), int(height * 0.9)
+            card_x0, card_y0 = int(width * 0.08), int(height * 0.1)
+            card_x1, card_y1 = int(width * 0.92), int(height * 0.9)
         _draw_rounded_rect(ov_draw, (card_x0, card_y0, card_x1, card_y1), radius=20, fill=(0, 0, 0, card_alpha))
 
         if show_header:
@@ -524,20 +589,25 @@ def create_scene_image(
 
             label_bbox = title_font.getbbox(label_text)
             label_y = card_y0 + (int(90 * scale) - (label_bbox[3] - label_bbox[1])) // 2
-            _draw_text_with_shadow(ov_draw, (card_x0 + padding, label_y), label_text,
+            lx_header = card_x0 + (card_x1 - card_x0 - (label_bbox[2] - label_bbox[0])) // 2
+            _draw_text_with_shadow(ov_draw, (lx_header, label_y), label_text,
                                    font=title_font, fill=(255, 255, 255, 255))
 
             body_top = header_y1
         else:
             body_top = card_y0
 
-        # Single primary text block — no hero/duplicate block beneath it
+        # Single primary text block — centred horizontally for consistency.
         inner_w = card_x1 - card_x0 - padding * 2
         lines = _wrap_text(body_text, body_font, inner_w)
         line_h = body_font_size + int(16 * scale)
-        text_y = body_top + int(40 * scale)
+        total_h = len(lines) * line_h
+        # Vertically centre text within the available card area.
+        text_y = body_top + max(int(40 * scale), ((card_y1 - body_top) - total_h) // 2)
         for line in lines:
-            _draw_text_with_shadow(ov_draw, (card_x0 + padding, text_y), line,
+            lb = body_font.getbbox(line)
+            lx = card_x0 + (card_x1 - card_x0 - (lb[2] - lb[0])) // 2
+            _draw_text_with_shadow(ov_draw, (lx, text_y), line,
                                    font=body_font, fill=(220, 240, 255, 245))
             text_y += line_h
 

@@ -84,6 +84,10 @@ class Settings(BaseSettings):
     hf_image_model: str = "black-forest-labs/FLUX.1-schnell"
     hf_inference_provider: str = "hf-inference"  # "hf-inference", "fal-ai", "replicate", or "together"
 
+    # Text-to-Video: "none" (default, uses Ken Burns) or "replicate"
+    video_provider: str = "none"
+    replicate_api_token: str = ""  # Replicate API token for text-to-video generation
+
     model_config = SettingsConfigDict(
         env_file=(".env.example", ".env"),
         env_file_encoding="utf-8",

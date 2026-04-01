@@ -78,6 +78,34 @@ export interface SEOMetadata {
   category_id: number;
 }
 
+export interface SceneRead {
+  id: string;
+  video_job_id: string;
+  scene_index: number;
+  scene_type: string;
+  narration_text: string;
+  on_screen_text: string | null;
+  visual_prompt: string | null;
+  asset_config_json: string;
+  duration_ms: number;
+  start_ms: number;
+  end_ms: number;
+  created_at: string;
+}
+
+export interface ScriptRead {
+  id: string;
+  video_job_id: string;
+  title: string;
+  hook: string;
+  intro: string | null;
+  outro: string | null;
+  full_text: string;
+  structured_json: string;
+  version: number;
+  created_at: string;
+}
+
 export interface AuthResponse {
   access_token: string;
   token_type: string;
@@ -179,6 +207,15 @@ export const videoJobsApi = {
     `${BASE_URL}/video-jobs/${id}/thumbnail`,
   getSEO: (id: string): Promise<SEOMetadata> =>
     apiClient.get<SEOMetadata>(`/video-jobs/${id}/seo`).then((r) => r.data),
+
+  getScenes: (id: string): Promise<SceneRead[]> =>
+    apiClient.get<SceneRead[]>(`/video-jobs/${id}/scenes`).then((r) => r.data),
+
+  getScript: (id: string): Promise<ScriptRead> =>
+    apiClient.get<ScriptRead>(`/video-jobs/${id}/script`).then((r) => r.data),
+
+  approveScript: (id: string): Promise<VideoJob> =>
+    apiClient.post<VideoJob>(`/video-jobs/${id}/approve`).then((r) => r.data),
 };
 
 export interface ChannelStats {

@@ -244,16 +244,17 @@ def _concatenate_audio(scene_audio_paths: list[Path], output_path: Path) -> None
 
 
 VALID_STATUSES = {
-    "queued",
-    "researching",
-    "script_generated",
-    "planning_visuals",
-    "generating_audio",
-    "generating_subtitles",
-    "rendering",
-    "packaging",
-    "completed",
-    "failed",
+    "queued",            # Job is waiting to be picked up by a Celery worker
+    "researching",       # LLM is generating the script
+    "script_generated",  # Script has been saved to the database
+    "planning_visuals",  # Scene objects are being created from the script
+    "awaiting_approval", # Script + scenes ready; paused until user approves via POST /approve
+    "generating_audio",  # TTS is synthesising voice-over audio (Step B)
+    "generating_subtitles",  # SRT subtitles are being generated
+    "rendering",         # FFmpeg is compositing the final video
+    "packaging",         # YouTube metadata is being assembled
+    "completed",         # Full pipeline finished; video is ready for download/upload
+    "failed",            # An unrecoverable error occurred
 }
 
 
@@ -280,6 +281,12 @@ def set_job_status(db: Session, job: VideoJob, status: str, error_message: str |
 
 @celery_app.task(name="app.services.jobs.tasks.process_video_job", bind=True, max_retries=2)
 def process_video_job(self, job_id: str) -> None:
+    """Step A: Generate script and scene plan, then pause for user review.
+
+    After this task completes the job status is set to ``awaiting_approval``.
+    The user reviews the generated scenes via the frontend and calls the
+    ``/approve`` endpoint to trigger :func:`render_video_job` (Step B).
+    """
     db = SessionLocal()
     storage = StorageService()
 
@@ -329,6 +336,11 @@ def process_video_job(self, job_id: str) -> None:
         except Exception as seo_exc:
             logger.warning("SEO generation failed for job %s, using defaults: %s", job_id, seo_exc)
 
+        # Persist SEO metadata on the job so it is available to render_video_job.
+        if seo_metadata:
+            job.metadata_json = json.dumps(seo_metadata)
+            db.add(job)
+
         from app.services.visuals.planner import generate_scenes_from_script
 
         set_job_status(db, job, "planning_visuals")
@@ -336,12 +348,105 @@ def process_video_job(self, job_id: str) -> None:
         add_job_event(db, job.id, "visual_planning", "completed", f"Generated {len(scenes)} scenes")
         db.commit()
 
+        # Pause here and wait for user approval before rendering.
+        set_job_status(db, job, "awaiting_approval")
+        add_job_event(
+            db, job.id, "approval_gate", "pending",
+            f"Script and {len(scenes)} scene(s) ready for review. "
+            "Approve to start audio and video rendering."
+        )
+        db.commit()
+
+        logger.info("Video job %s is awaiting user approval", job_id)
+
+    except Exception as exc:
+        db.rollback()
+        job = db.get(VideoJob, job_id)
+
+        # Detect OpenAI insufficient_quota errors – do not retry these.
+        should_retry = True
+        error_msg = str(exc)
+
+        try:
+            import openai  # noqa: PLC0415
+            if isinstance(exc, openai.RateLimitError):
+                if "insufficient_quota" in error_msg or "exceeded your current quota" in error_msg:
+                    should_retry = False
+                    error_msg = (
+                        "OpenAI API quota exhausted. "
+                        "Please add credits at https://platform.openai.com/settings/organization/billing"
+                    )
+        except ImportError:
+            pass
+
+        if job:
+            if not should_retry:
+                set_job_status(db, job, "failed", error_message=error_msg)
+            else:
+                set_job_status(db, job, "failed", error_message=str(exc))
+            add_job_event(db, job.id, "pipeline", "failed", f"Script generation failed: {error_msg}")
+            db.commit()
+
+        logger.exception("Failed script generation for video job %s", job_id)
+
+        if not should_retry:
+            return
+
+        raise self.retry(exc=exc, countdown=5)
+    finally:
+        db.close()
+
+
+@celery_app.task(name="app.services.jobs.tasks.render_video_job", bind=True, max_retries=2)
+def render_video_job(self, job_id: str) -> None:
+    """Step B: Generate audio, subtitles, and render the final video.
+
+    Called after the user approves the generated script via the
+    ``POST /api/video-jobs/{job_id}/approve`` endpoint.
+    """
+    db = SessionLocal()
+    storage = StorageService()
+
+    try:
+        job = db.get(VideoJob, job_id)
+        if not job:
+            logger.error("Video job %s not found", job_id)
+            return
+
+        project = db.get(Project, job.project_id)
+        if not project:
+            raise RuntimeError("Project not found for video job")
+
+        # Re-fetch the generated script from the database.
+        script = db.scalars(
+            select(Script).where(Script.video_job_id == job_id).order_by(Script.version.desc())
+        ).first()
+        if not script:
+            raise RuntimeError("Script not found for video job — cannot render without a script")
+
+        # Recover any previously persisted SEO metadata.
+        seo_metadata: dict | None = None
+        if job.metadata_json:
+            try:
+                seo_metadata = json.loads(job.metadata_json)
+            except (ValueError, TypeError):
+                pass
+
+        scene_rows = db.scalars(
+            select(Scene).where(Scene.video_job_id == job.id).order_by(Scene.scene_index.asc())
+        ).all()
+        if not scene_rows:
+            raise RuntimeError("No scenes found for video job — cannot render without scenes")
+
         set_job_status(db, job, "generating_audio")
+        add_job_event(db, job.id, "tts", "started", "Audio generation started")
+        db.commit()
+
         tts_client = TTSClient()
         audio_dir = Path(storage.job_dir(project.id, job.id)) / "audio"
         audio_dir.mkdir(parents=True, exist_ok=True)
         scene_audio_paths: list[Path] = []
-        for scene in scenes:
+        for scene in scene_rows:
             scene_audio_path = audio_dir / f"scene_{scene.scene_index:03d}.mp3"
             tts_client.synthesize_speech(
                 text=scene.narration_text,
@@ -365,9 +470,6 @@ def process_video_job(self, job_id: str) -> None:
         db.commit()
 
         set_job_status(db, job, "generating_subtitles")
-        scene_rows = db.scalars(
-            select(Scene).where(Scene.video_job_id == job.id).order_by(Scene.scene_index.asc())
-        ).all()
         srt_content = generate_srt_content(scene_rows)
         srt_path = storage.write_text(project.id, job.id, "subtitles/subtitles.srt", srt_content)
         db.add(
@@ -394,11 +496,8 @@ def process_video_job(self, job_id: str) -> None:
             subtitles_path=Path(srt_path),
             output_path=render_output,
         )
-        # Upload the rendered file to the configured storage backend and persist
-        # the storage key (S3 object key or local absolute path) on the job.
         render_storage_key = storage.upload_file(render_output, project.id, job.id, "renders/final.mp4")
         job.render_storage_key = render_storage_key
-        # Keep the Asset record created inside render_video in sync.
         render_asset = db.scalars(
             select(Asset)
             .where(Asset.video_job_id == job.id, Asset.asset_type == "render_output")
@@ -478,21 +577,18 @@ def process_video_job(self, job_id: str) -> None:
         db.rollback()
         job = db.get(VideoJob, job_id)
 
-        # Detect OpenAI insufficient_quota errors – do not retry these.
         should_retry = True
         error_msg = str(exc)
 
         try:
             import openai  # noqa: PLC0415
             if isinstance(exc, openai.RateLimitError):
-                # Distinguish quota-exhausted from transient rate-limit
                 if "insufficient_quota" in error_msg or "exceeded your current quota" in error_msg:
                     should_retry = False
                     error_msg = (
                         "OpenAI API quota exhausted. "
                         "Please add credits at https://platform.openai.com/settings/organization/billing"
                     )
-                # Otherwise it is a transient rate limit – retry as usual
         except ImportError:
             pass
 
@@ -504,10 +600,10 @@ def process_video_job(self, job_id: str) -> None:
             add_job_event(db, job.id, "pipeline", "failed", f"Pipeline failed: {error_msg}")
             db.commit()
 
-        logger.exception("Failed processing video job %s", job_id)
+        logger.exception("Failed rendering video job %s", job_id)
 
         if not should_retry:
-            return  # Do not retry quota-exhausted failures
+            return
 
         raise self.retry(exc=exc, countdown=5)
     finally:

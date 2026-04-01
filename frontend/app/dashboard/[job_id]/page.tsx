@@ -3,12 +3,13 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { videoJobsApi, VideoJob, SEOMetadata } from "@/lib/api";
+import { videoJobsApi, VideoJob, SEOMetadata, SceneRead } from "@/lib/api";
 import { isAuthenticated, removeToken, getToken } from "@/lib/auth";
 
 const PIPELINE_STEPS = [
   { key: "queued", label: "Queued" },
   { key: "generating_script", label: "Script" },
+  { key: "awaiting_approval", label: "Review" },
   { key: "generating_audio", label: "Audio" },
   { key: "generating_subtitles", label: "Subtitles" },
   { key: "rendering", label: "Rendering" },
@@ -16,9 +17,22 @@ const PIPELINE_STEPS = [
   { key: "completed", label: "Completed" },
 ];
 
+// Map actual backend statuses to their pipeline-step position.
+const STATUS_TO_STEP: Record<string, number> = {
+  queued: 0,
+  researching: 1,
+  script_generated: 1,
+  planning_visuals: 1,
+  awaiting_approval: 2,
+  generating_audio: 3,
+  generating_subtitles: 4,
+  rendering: 5,
+  packaging: 6,
+  completed: 7,
+};
+
 function getStepIndex(status: string): number {
-  const idx = PIPELINE_STEPS.findIndex((s) => s.key === status);
-  return idx === -1 ? 0 : idx;
+  return STATUS_TO_STEP[status] ?? 0;
 }
 
 function ProgressStepper({ status }: { status: string }) {
@@ -94,7 +108,7 @@ function ProgressStepper({ status }: { status: string }) {
 
 const STATUS_COLORS: Record<string, string> = {
   queued: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300",
-  researching: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
+  awaiting_approval: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
   generating_script: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
   script_generated: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
   planning_visuals: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
@@ -421,6 +435,115 @@ function SEOPreview({ seo }: { seo: SEOMetadata }) {
   );
 }
 
+function ScriptReviewPanel({
+  jobId,
+  onApproved,
+}: {
+  jobId: string;
+  onApproved: (updatedJob: VideoJob) => void;
+}) {
+  const [scenes, setScenes] = useState<SceneRead[]>([]);
+  const [loadingScenes, setLoadingScenes] = useState(true);
+  const [approving, setApproving] = useState(false);
+  const [approveError, setApproveError] = useState("");
+
+  useEffect(() => {
+    setLoadingScenes(true);
+    videoJobsApi
+      .getScenes(jobId)
+      .then((data) => setScenes(data))
+      .catch((err) => console.error("Failed to load scenes:", err))
+      .finally(() => setLoadingScenes(false));
+  }, [jobId]);
+
+  async function handleApprove() {
+    setApproving(true);
+    setApproveError("");
+    try {
+      const updated = await videoJobsApi.approveScript(jobId);
+      onApproved(updated);
+    } catch {
+      setApproveError("Failed to approve script. Please try again.");
+      setApproving(false);
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 shadow-sm p-6 mb-6">
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+            📋 Script Review
+          </h2>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
+            Review the generated scenes below. Click{" "}
+            <strong>Approve &amp; Generate Video</strong> to start rendering.
+          </p>
+        </div>
+        <span className="inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 px-2.5 py-0.5 text-xs font-medium">
+          Awaiting Approval
+        </span>
+      </div>
+
+      {loadingScenes ? (
+        <div className="flex items-center gap-2 text-zinc-500 dark:text-zinc-400 text-sm py-4">
+          <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+          </svg>
+          Loading scenes…
+        </div>
+      ) : scenes.length === 0 ? (
+        <p className="text-sm text-zinc-500 dark:text-zinc-400 py-4">
+          No scenes found. You can still proceed with rendering.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-4 mb-6">
+          {scenes.map((scene, idx) => (
+            <div
+              key={scene.id}
+              className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-4"
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 text-xs font-semibold">
+                  {idx + 1}
+                </span>
+                <span className="text-xs font-medium text-zinc-400 dark:text-zinc-500 uppercase tracking-wide">
+                  {Math.round(scene.duration_ms / 1000)}s
+                </span>
+              </div>
+              {scene.on_screen_text && (
+                <p className="text-sm text-zinc-800 dark:text-zinc-200 leading-relaxed mb-2">
+                  {scene.on_screen_text}
+                </p>
+              )}
+              {scene.narration_text && scene.narration_text !== scene.on_screen_text && (
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 italic border-t border-zinc-100 dark:border-zinc-800 pt-2 mt-2">
+                  🎙 {scene.narration_text}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {approveError && (
+        <p className="mb-4 text-sm rounded-lg px-3 py-2 bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+          {approveError}
+        </p>
+      )}
+
+      <button
+        onClick={handleApprove}
+        disabled={approving}
+        className="rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed px-5 py-2.5 text-sm font-semibold text-white transition-colors"
+      >
+        {approving ? "Starting rendering…" : "✅ Approve & Generate Video"}
+      </button>
+    </div>
+  );
+}
+
 export default function VideoJobDetailPage() {
   const router = useRouter();
   const params = useParams<{ job_id: string }>();
@@ -460,10 +583,16 @@ export default function VideoJobDetailPage() {
     fetchJob();
   }, [fetchJob, router]);
 
-  // Auto-refresh every 3 seconds while job is still in progress
+  // Auto-refresh every 3 seconds while job is still in progress.
+  // Stop polling at awaiting_approval — the user must take action.
   useEffect(() => {
     if (!job) return;
-    if (job.status === "completed" || job.status === "failed") return;
+    if (
+      job.status === "completed" ||
+      job.status === "failed" ||
+      job.status === "awaiting_approval"
+    )
+      return;
     const timer = setInterval(fetchJob, 3000);
     return () => clearInterval(timer);
   }, [job, fetchJob]);
@@ -590,6 +719,14 @@ export default function VideoJobDetailPage() {
 
         {/* Progress stepper */}
         <ProgressStepper status={job.status} />
+
+        {/* Script review gate — shown when script is ready and awaiting user approval */}
+        {job.status === "awaiting_approval" && (
+          <ScriptReviewPanel
+            jobId={jobId}
+            onApproved={(updated) => setJob(updated)}
+          />
+        )}
 
         {/* Details card */}
         <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm p-6 mb-6">

@@ -20,7 +20,7 @@ from app.schemas.video_job import (
     YouTubeUploadResponse,
     SEOMetadataResponse,
 )
-from app.services.jobs.pipeline import enqueue_video_job
+from app.services.jobs.pipeline import enqueue_video_job, enqueue_render_job
 
 router = APIRouter(prefix="/video-jobs", tags=["video-jobs"])
 
@@ -228,6 +228,53 @@ def get_video_job_seo(
         hashtags=data.get("hashtags", []),
         category_id=int(data.get("category_id", 28)),
     )
+
+
+@router.post("/{job_id}/approve", response_model=VideoJobRead)
+def approve_script(
+    job_id: str,
+    db: Session = Depends(get_database),
+    current_user: User = Depends(get_current_user),
+) -> VideoJobRead:
+    """Approve the generated script and start audio/video rendering.
+
+    Can only be called when the job is in ``awaiting_approval`` status.
+    Triggers the :func:`render_video_job` Celery task and immediately
+    returns the updated job record.
+    """
+    job = db.scalar(
+        select(VideoJob)
+        .join(Project, Project.id == VideoJob.project_id)
+        .where(VideoJob.id == job_id, Project.user_id == current_user.id)
+    )
+    if not job:
+        raise HTTPException(status_code=404, detail="Video job not found")
+
+    if job.status != "awaiting_approval":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Job cannot be approved in its current state (status: {job.status}). "
+                "Only jobs with status 'awaiting_approval' can be approved."
+            ),
+        )
+
+    from app.db.models.job_event import JobEvent  # noqa: PLC0415
+
+    event = JobEvent(
+        video_job_id=job.id,
+        step_name="approval_gate",
+        status="approved",
+        message="Script approved by user — starting video rendering",
+    )
+    db.add(event)
+    job.status = "queued"
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    enqueue_render_job(job.id)
+    return VideoJobRead.model_validate(job)
 
 
 @router.post("/{job_id}/upload", response_model=YouTubeUploadResponse)

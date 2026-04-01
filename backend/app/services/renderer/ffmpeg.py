@@ -274,16 +274,10 @@ def create_scene_image(
     norm_label = _norm(scene_label)
     norm_body = _norm(body_text)
 
-    # Strict two-layer policy: show the scene-type badge only when it is
-    # semantically distinct from the primary text.  Any overlap (label ⊆ body,
-    # body ⊆ label, or exact normalised match) suppresses the header so that
-    # the same phrase is never rendered twice.
-    show_header = (
-        bool(norm_label)
-        and bool(norm_body)
-        and norm_label not in norm_body
-        and norm_body not in norm_label
-    )
+    # Never render internal scene-type labels (Intro, Outro, Bullet Explainer,
+    # Icon Compare, etc.) to end users.  These labels are only used internally
+    # for template selection and should not appear as visible video text.
+    show_header = False
 
     if scene_type_key == "intro":
         # Centred large title layout

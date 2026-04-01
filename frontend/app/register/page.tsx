@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import axios from "axios";
 import { authApi } from "@/lib/api";
 import { setToken, isAuthenticated } from "@/lib/auth";
 
@@ -28,11 +29,14 @@ export default function RegisterPage() {
       setToken(data.access_token);
       router.replace("/");
     } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { detail?: string } } };
-      setError(
-        axiosErr.response?.data?.detail ??
-          "Registration failed. Please try a different email."
-      );
+      if (axios.isAxiosError(err)) {
+        setError(
+          err.response?.data?.detail ??
+            "Registration failed. Please try a different email."
+        );
+      } else {
+        setError("Registration failed. Please try a different email.");
+      }
     } finally {
       setLoading(false);
     }

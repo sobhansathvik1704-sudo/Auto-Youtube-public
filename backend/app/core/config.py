@@ -85,7 +85,7 @@ class Settings(BaseSettings):
     hf_inference_provider: str = "hf-inference"  # "hf-inference", "fal-ai", "replicate", or "together"
 
     model_config = SettingsConfigDict(
-        env_file=".env.example",
+        env_file=(".env.example", ".env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",

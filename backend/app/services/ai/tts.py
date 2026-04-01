@@ -23,17 +23,20 @@ _LANGUAGE_CODE_MAP: dict[str, str] = {
 
 _DEFAULT_LANGUAGE_CODE = "en-US"
 
-# Best voices per language — ordered by quality (Neural2 > WaveNet > Standard)
+# Best voices per language — ordered by quality (Journey > Neural2 > WaveNet > Standard)
 # These are the most natural-sounding voices for YouTube narration.
 _VOICE_PREFERENCES: dict[str, list[str]] = {
-    # Indian English — great for Telugu+English code-switching
+    # Indian English — great for Telugu+English code-switching.
+    # Journey voices are the most expressive and handle Indian accents/slang best.
     "en-IN": [
-        "en-IN-Neural2-D",      # Female, very natural
-        "en-IN-Neural2-A",      # Female, clear and warm
-        "en-IN-Neural2-B",      # Male, conversational
-        "en-IN-Neural2-C",      # Male, authoritative
-        "en-IN-Wavenet-D",      # Female fallback
-        "en-IN-Wavenet-B",      # Male fallback
+        "en-IN-Journey-D",      # Female, most expressive — best for Indian accent/slang
+        "en-IN-Journey-F",      # Female, warm and natural Journey voice
+        "en-IN-Neural2-D",      # Female Neural2 fallback, very natural
+        "en-IN-Neural2-A",      # Female Neural2, clear and warm
+        "en-IN-Neural2-B",      # Male Neural2, conversational
+        "en-IN-Neural2-C",      # Male Neural2, authoritative
+        "en-IN-Wavenet-D",      # Female WaveNet fallback
+        "en-IN-Wavenet-B",      # Male WaveNet fallback
     ],
     # American English — best overall quality
     "en-US": [
@@ -55,11 +58,14 @@ _VOICE_PREFERENCES: dict[str, list[str]] = {
 
 
 class TTSClient:
-    """Google Cloud Text-to-Speech client with Neural2 voice support.
+    """Google Cloud Text-to-Speech client with Journey and Neural2 voice support.
 
     Uses the highest quality voices available for natural, human-like narration
-    optimized for YouTube content. Falls back gracefully through voice quality
-    tiers if the preferred voice is unavailable.
+    optimized for YouTube content. For Indian English the newer Journey voices
+    (``en-IN-Journey-D``, ``en-IN-Journey-F``) are preferred because they handle
+    Indian accents and code-switching slang far more expressively than Neural2.
+    Falls back gracefully through voice quality tiers if the preferred voice is
+    unavailable.
 
     Authentication is handled automatically by the Google Cloud client library
     using the ``GOOGLE_APPLICATION_CREDENTIALS`` environment variable, which
@@ -73,8 +79,9 @@ class TTSClient:
     def synthesize_speech(self, text: str, language: str, output_path: Path) -> Path:
         """Convert *text* to a high-quality MP3 audio file at *output_path*.
 
-        Uses Neural2 voices for near-human narration quality, with automatic
-        fallback to WaveNet and Standard voices if needed.
+        Uses Journey voices (for Indian English) and Neural2 voices for near-human
+        narration quality, with automatic fallback to WaveNet and Standard voices
+        if needed.
 
         Args:
             text: The narration text to convert to speech.

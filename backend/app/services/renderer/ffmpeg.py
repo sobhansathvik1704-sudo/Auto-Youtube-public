@@ -728,6 +728,38 @@ def _image_to_kenburns_clip(
     return output_path
 
 
+def _loop_video_to_duration(
+    input_path: Path,
+    duration_s: float,
+    output_path: Path,
+    width: int,
+    height: int,
+) -> Path:
+    """Loop *input_path* (an MP4 clip) to exactly *duration_s* seconds.
+
+    If the source clip is shorter than *duration_s* it is looped using
+    FFmpeg's ``-stream_loop`` flag.  If it is longer, it is trimmed.
+    The output is re-encoded at the project resolution (*width* × *height*)
+    using the same quality settings as the rest of the pipeline.
+    """
+    cmd = [
+        settings.ffmpeg_bin,
+        "-y",
+        "-stream_loop", "-1",  # loop indefinitely; -t trims to exact duration
+        "-i", str(input_path),
+        "-vf", f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+               f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
+        "-t", str(duration_s),
+        "-pix_fmt", "yuv420p",
+        "-c:v", "libx264",
+        "-crf", "18",
+        "-preset", "slow",
+        str(output_path),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True)
+    return output_path
+
+
 def _concat_avatar_clips(
     scene_clips: list[Path],
     audio_path: Path,
@@ -825,22 +857,75 @@ def render_video(
         concat_file = output_path.parent / "concat.txt"
         scene_clips: list[Path] = []
 
-        for scene in scenes:
-            scene_image = scene_dir / f"{scene.scene_index:03d}.png"
-            create_scene_image(scene, width, height, scene_image, total_scenes=total_scenes)
+        # Determine whether to use an AI text-to-video provider for scene clips
+        use_video_provider = (
+            settings.video_provider.lower() == "replicate"
+            and bool(settings.replicate_api_token)
+        )
+        video_provider_instance = None
+        if use_video_provider:
+            from app.services.videos.replicate_provider import ReplicateVideoProvider  # noqa: PLC0415
 
+            video_provider_instance = ReplicateVideoProvider(
+                api_token=settings.replicate_api_token,
+                model=settings.replicate_video_model,
+                anime_style=True,
+            )
+
+        for scene in scenes:
             clip_path = clips_dir / f"scene_{scene.scene_index:03d}.mp4"
             duration_s = scene.duration_ms / 1000.0
-            try:
-                _image_to_kenburns_clip(scene_image, duration_s, clip_path, width, height)
-            except Exception as exc:
-                logger.warning(
-                    "Ken Burns clip failed for scene %d (%s); using static loop",
-                    scene.scene_index,
-                    exc,
+
+            # --- Try AI video generation first (if provider is active) ---
+            video_generated = False
+            if video_provider_instance is not None:
+                raw_video_path = clips_dir / f"scene_{scene.scene_index:03d}_raw.mp4"
+                visual_prompt = (
+                    getattr(scene, "visual_prompt", None)
+                    or getattr(scene, "narration_text", None)
+                    or getattr(scene, "on_screen_text", None)
+                    or "cinematic anime landscape"
                 )
-                # Fallback: simple looped still image via concat demuxer entry (handled below)
-                clip_path = scene_image  # flag: will be handled as a still in concat
+                try:
+                    logger.info(
+                        "Generating AI video clip for scene %d via Replicate",
+                        scene.scene_index,
+                    )
+                    generated = video_provider_instance.generate_video(
+                        visual_prompt, raw_video_path
+                    )
+                    if generated is not None:
+                        _loop_video_to_duration(generated, duration_s, clip_path, width, height)
+                        video_generated = True
+                    else:
+                        logger.warning(
+                            "Replicate returned no video for scene %d; "
+                            "falling back to Ken Burns",
+                            scene.scene_index,
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "AI video generation failed for scene %d (%s); "
+                        "falling back to Ken Burns",
+                        scene.scene_index,
+                        exc,
+                    )
+
+            # --- Fallback: static image + Ken Burns animation ---
+            if not video_generated:
+                scene_image = scene_dir / f"{scene.scene_index:03d}.png"
+                create_scene_image(scene, width, height, scene_image, total_scenes=total_scenes)
+                try:
+                    _image_to_kenburns_clip(scene_image, duration_s, clip_path, width, height)
+                except Exception as exc:
+                    logger.warning(
+                        "Ken Burns clip failed for scene %d (%s); using static loop",
+                        scene.scene_index,
+                        exc,
+                    )
+                    # Fallback: simple looped still image via concat demuxer entry (handled below)
+                    clip_path = scene_image  # flag: will be handled as a still in concat
+
             scene_clips.append(clip_path)
 
         # Build concat file for the per-scene clips

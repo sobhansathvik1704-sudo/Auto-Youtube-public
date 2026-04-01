@@ -166,6 +166,7 @@ def create_scene_image(
         hf_provider = HuggingFaceImageProvider(
             api_token=settings.hf_api_token,
             model=settings.hf_image_model,
+            provider=settings.hf_inference_provider,
         )
         prompt = scene.visual_prompt or scene.on_screen_text or scene.narration_text or scene.scene_type or ""
         ai_tmp = output_path.with_suffix(".ai.png")

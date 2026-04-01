@@ -222,11 +222,29 @@ def create_scene_image(
 
     is_portrait = height > width
 
-    # Deduplicate: skip the header badge when the scene label is already
-    # present (or contained) in the body text.
-    label_lower = scene_label.lower().strip()
-    body_lower = body_text.lower().strip()
-    show_header = label_lower not in body_lower and body_lower not in label_lower
+    # -----------------------------------------------------------------------
+    # Local text normalisation helper (lowercase + strip punctuation +
+    # collapse whitespace).  Keeps deduplication robust against minor
+    # differences in casing, punctuation, or spacing.
+    # -----------------------------------------------------------------------
+    def _norm(t: str) -> str:
+        lowered = t.lower()
+        alphanum = "".join(ch if ch.isalnum() or ch == " " else " " for ch in lowered)
+        return " ".join(alphanum.split())
+
+    norm_label = _norm(scene_label)
+    norm_body = _norm(body_text)
+
+    # Strict two-layer policy: show the scene-type badge only when it is
+    # semantically distinct from the primary text.  Any overlap (label ⊆ body,
+    # body ⊆ label, or exact normalised match) suppresses the header so that
+    # the same phrase is never rendered twice.
+    show_header = (
+        bool(norm_label)
+        and bool(norm_body)
+        and norm_label not in norm_body
+        and norm_body not in norm_label
+    )
 
     if scene_type_key == "intro":
         # Centred large title layout
@@ -238,22 +256,26 @@ def create_scene_image(
             card_x1, card_y1 = int(width * 0.92), int(height * 0.8)
         _draw_rounded_rect(ov_draw, (card_x0, card_y0, card_x1, card_y1), radius=24, fill=(0, 0, 0, card_alpha))
 
-        # Title label
-        label_bbox = title_font.getbbox(scene_label)
-        label_w = label_bbox[2] - label_bbox[0]
-        label_x = (width - label_w) // 2
-        label_y = card_y0 + int(40 * scale)
-        ov_draw.text((label_x, label_y), scene_label, fill=(255, 220, 100, 255), font=title_font)
+        if show_header:
+            # Title label — omitted when it would duplicate the body text
+            label_bbox = title_font.getbbox(scene_label)
+            label_w = label_bbox[2] - label_bbox[0]
+            label_x = (width - label_w) // 2
+            label_y = card_y0 + int(40 * scale)
+            ov_draw.text((label_x, label_y), scene_label, fill=(255, 220, 100, 255), font=title_font)
 
-        # Divider line
-        div_y = label_y + label_bbox[3] + int(20 * scale)
-        ov_draw.line([(card_x0 + 40, div_y), (card_x1 - 40, div_y)], fill=(255, 255, 255, 100), width=2)
+            # Divider line
+            div_y = label_y + label_bbox[3] + int(20 * scale)
+            ov_draw.line([(card_x0 + 40, div_y), (card_x1 - 40, div_y)], fill=(255, 255, 255, 100), width=2)
+            body_top_intro = div_y + int(30 * scale)
+        else:
+            body_top_intro = card_y0 + int(40 * scale)
 
         # Body text centred
         inner_w = card_x1 - card_x0 - padding * 2
         lines = _wrap_text(body_text, body_font, inner_w)
         total_h = len(lines) * (body_font_size + int(14 * scale))
-        text_y = div_y + int(30 * scale) + ((card_y1 - div_y - int(30 * scale)) - total_h) // 2
+        text_y = body_top_intro + ((card_y1 - body_top_intro) - total_h) // 2
         for line in lines:
             lb = body_font.getbbox(line)
             lx = card_x0 + (card_x1 - card_x0 - (lb[2] - lb[0])) // 2
@@ -274,15 +296,20 @@ def create_scene_image(
         ov_draw.rounded_rectangle([card_x0, card_y0, card_x1, card_y0 + int(8 * scale)],
                                    radius=4, fill=(255, 80, 150, 220))
 
-        label_bbox = title_font.getbbox(scene_label)
-        label_w = label_bbox[2] - label_bbox[0]
-        label_x = (width - label_w) // 2
-        label_y = card_y0 + int(50 * scale)
-        ov_draw.text((label_x, label_y), scene_label, fill=(255, 160, 200, 255), font=title_font)
+        if show_header:
+            # Scene-type label — omitted when it would duplicate the body text
+            label_bbox = title_font.getbbox(scene_label)
+            label_w = label_bbox[2] - label_bbox[0]
+            label_x = (width - label_w) // 2
+            label_y = card_y0 + int(50 * scale)
+            ov_draw.text((label_x, label_y), scene_label, fill=(255, 160, 200, 255), font=title_font)
+            body_top_outro = label_y + label_bbox[3] + int(40 * scale)
+        else:
+            body_top_outro = card_y0 + int(50 * scale)
 
         inner_w = card_x1 - card_x0 - padding * 2
         lines = _wrap_text(body_text, body_font, inner_w)
-        text_y = label_y + label_bbox[3] + int(40 * scale)
+        text_y = body_top_outro
         for line in lines:
             lb = body_font.getbbox(line)
             lx = card_x0 + (card_x1 - card_x0 - (lb[2] - lb[0])) // 2
@@ -290,17 +317,17 @@ def create_scene_image(
             text_y += body_font_size + int(14 * scale)
 
     else:
-        # Card-based layout for content scenes
+        # Card-based layout for content scenes (portrait: 45–93% of frame height)
         if is_portrait:
-            card_x0, card_y0 = int(width * 0.04), int(height * 0.42)
-            card_x1, card_y1 = int(width * 0.96), int(height * 0.92)
+            card_x0, card_y0 = int(width * 0.04), int(height * 0.45)
+            card_x1, card_y1 = int(width * 0.96), int(height * 0.93)
         else:
             card_x0, card_y0 = int(width * 0.05), int(height * 0.1)
             card_x1, card_y1 = int(width * 0.95), int(height * 0.9)
         _draw_rounded_rect(ov_draw, (card_x0, card_y0, card_x1, card_y1), radius=20, fill=(0, 0, 0, card_alpha))
 
         if show_header:
-            # Header strip
+            # Header strip — one label badge, shown only when distinct from body
             header_y1 = card_y0 + int(90 * scale)
             _draw_rounded_rect(ov_draw, (card_x0, card_y0, card_x1, header_y1), radius=20, fill=(0, 100, 200, 180))
 
@@ -318,7 +345,7 @@ def create_scene_image(
         else:
             body_top = card_y0
 
-        # Body text left-aligned
+        # Single primary text block — no hero/duplicate block beneath it
         inner_w = card_x1 - card_x0 - padding * 2
         lines = _wrap_text(body_text, body_font, inner_w)
         text_y = body_top + int(40 * scale)

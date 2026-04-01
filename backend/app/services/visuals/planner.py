@@ -1,4 +1,5 @@
 import json
+import re
 
 from sqlalchemy.orm import Session
 
@@ -6,29 +7,172 @@ from app.db.models.scene import Scene
 from app.db.models.script import Script
 from app.db.models.video_job import VideoJob
 
+# Mapping of topic keyword groups → preferred visual vocabulary.
+# Each entry is (keywords_list, preferred_vocabulary_string).
+# The first matching entry wins.
+_TOPIC_VISUAL_VOCAB: list[tuple[list[str], str]] = [
+    (
+        ["linux", "process", "pid", "signal", "kill", "htop", "scheduler",
+         "zombie", "nice", "renice", "sigterm", "sigkill", "fork", "exec"],
+        (
+            "linux terminal window, htop or top command output, ps aux listing, "
+            "PID numbers, process tree, shell prompt, dark terminal theme"
+        ),
+    ),
+    (
+        ["operating system", "kernel", "memory management", "syscall",
+         "context switch", "interrupt", "virtual memory", "page table"],
+        (
+            "operating system architecture diagram, kernel vs user space, "
+            "memory map, system call flow, process scheduler diagram"
+        ),
+    ),
+    (
+        ["c++", "c programming", "compiler", "compilation", "assembly",
+         "linker", "preprocessor", "makefile", "gcc", "g++"],
+        (
+            "C or C++ source code file in dark editor, terminal compiler output, "
+            "assembly listing, object file linking, gcc g++ command"
+        ),
+    ),
+    (
+        ["python", "django", "flask", "fastapi", "pip", "virtualenv"],
+        (
+            "python source code with syntax highlighting, terminal with python REPL, "
+            "pip install command, dark developer theme"
+        ),
+    ),
+    (
+        ["javascript", "typescript", "react", "node", "frontend",
+         "css", "html", "dom", "browser"],
+        (
+            "JavaScript or TypeScript source code, browser developer tools console, "
+            "node.js terminal output, code editor dark theme"
+        ),
+    ),
+    (
+        ["network", "tcp", "http", "socket", "dns", "tls", "ssl",
+         "packet", "ip address", "firewall"],
+        (
+            "network topology diagram, packet flow visualization, TCP/IP layer stack, "
+            "curl or ping command output, terminal network tools"
+        ),
+    ),
+    (
+        ["database", "sql", "postgres", "mysql", "mongodb", "redis",
+         "query", "transaction", "schema"],
+        (
+            "SQL query in terminal, database schema diagram, table structure, "
+            "query execution plan, dark themed database terminal"
+        ),
+    ),
+    (
+        ["git", "version control", "github", "commit", "branch", "merge",
+         "pull request", "rebase", "diff"],
+        (
+            "git command in terminal, branch diagram, commit history graph, "
+            "diff output, dark terminal with git log"
+        ),
+    ),
+    (
+        ["docker", "kubernetes", "container", "deployment", "devops",
+         "ci/cd", "microservice"],
+        (
+            "docker command in terminal, container architecture diagram, "
+            "Kubernetes pod diagram, deployment pipeline, dark terminal"
+        ),
+    ),
+    (
+        ["algorithm", "data structure", "sorting", "linked list",
+         "recursion", "big o", "complexity"],
+        (
+            "algorithm flowchart or pseudocode, data structure visualization "
+            "(tree nodes, linked list boxes), complexity graph, dark background"
+        ),
+    ),
+]
+
+# Quality and style modifiers — educational/technical illustration style,
+# avoiding the generic "cinematic portrait" look that stock generators default to.
+_QUALITY_MODIFIERS = (
+    "high quality, sharp, educational illustration style, "
+    "dark background, developer aesthetic, 4K"
+)
+
+# Negative keywords to steer generators away from misleading/off-topic imagery.
+_NEGATIVE_KEYWORDS = (
+    "no finance charts, no trading dashboard, no stock market monitor, "
+    "no vague cyber corridor, no random glowing orbs, no generic human portrait, "
+    "no text, no letters, no watermarks"
+)
+
+# Words/phrases whose presence in a visual_concept indicate it is already
+# grounded in a specific technical idea. Used to skip injecting extra vocabulary
+# when the LLM already produced a precise description.
+_CONCEPT_GROUNDING_KEYWORDS = frozenset([
+    "terminal", "process", "code", "shell", "diagram", "command", "screen",
+    "window", "script", "compiler", "source", "signal", "kill", "pid",
+    "htop", "top", "ps", "tree", "socket", "packet", "sql", "git",
+    "docker", "container", "algorithm", "flowchart",
+])
+
+# Pre-compiled word-boundary patterns for grounding keyword detection.
+# Using word boundaries avoids false positives (e.g. "pid" inside "rapid").
+_CONCEPT_GROUNDING_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b" + re.escape(kw) + r"\b") for kw in _CONCEPT_GROUNDING_KEYWORDS
+]
+
+
+def _detect_topic_vocabulary(topic: str) -> str | None:
+    """Return preferred visual vocabulary string for recognised technical topics.
+
+    Uses word-boundary regex matching so that short keywords (e.g. ``kill``,
+    ``pid``, ``api``) do not produce false positives against words that merely
+    contain them as substrings (e.g. ``skill``, ``rapid``).  Multi-word phrases
+    in the keyword list are also matched correctly.
+
+    Returns ``None`` if the topic does not match any known category.
+    """
+    topic_lower = topic.lower()
+    for keywords, vocab in _TOPIC_VISUAL_VOCAB:
+        for kw in keywords:
+            pattern = r"\b" + re.escape(kw) + r"\b"
+            if re.search(pattern, topic_lower):
+                return vocab
+    return None
+
 
 def _build_visual_prompt(segment: dict, topic: str) -> str:
     """Build an image generation prompt for a segment.
 
     Prefers the segment's ``visual_concept`` field (set by the LLM) over a
-    generic fallback so that each scene gets a distinct, concept-driven image
-    rather than the same vague cyber-aesthetic every time.
+    generic fallback so that each scene gets a distinct, concept-driven image.
+    Injects topic-specific vocabulary when the LLM concept is not already
+    grounded in technical terminology, and appends negative keywords to prevent
+    generic finance/corridor/portrait imagery.
     """
     visual_concept = (segment.get("visual_concept") or "").strip()
+    topic_vocab = _detect_topic_vocabulary(topic)
+
     if visual_concept:
-        # Use the LLM-provided visual concept as the primary description
-        return (
-            f"{visual_concept}, "
-            "photorealistic, high quality, dramatic lighting, 4K, cinematic, "
-            "no text, no letters, no watermarks"
+        # Check if the concept already contains any grounding keyword using
+        # word-boundary matching to avoid spurious substring hits.
+        concept_lower = visual_concept.lower()
+        already_grounded = any(
+            pat.search(concept_lower) for pat in _CONCEPT_GROUNDING_PATTERNS
         )
+        if topic_vocab and not already_grounded:
+            base = f"{visual_concept}, {topic_vocab}"
+        else:
+            base = visual_concept
+        return f"{base}, {_QUALITY_MODIFIERS}, {_NEGATIVE_KEYWORDS}"
 
     # Fallback: derive from on_screen_text / topic
     subject = (segment.get("on_screen_text") or "").strip() or topic
+    vocab_part = f", {topic_vocab}" if topic_vocab else ""
     return (
-        f"{topic}, {subject}, "
-        "high quality, dramatic lighting, 4K, cinematic, professional photography, "
-        "no text, no letters, no watermarks"
+        f"{topic}, {subject}{vocab_part}, "
+        f"{_QUALITY_MODIFIERS}, {_NEGATIVE_KEYWORDS}"
     )
 
 

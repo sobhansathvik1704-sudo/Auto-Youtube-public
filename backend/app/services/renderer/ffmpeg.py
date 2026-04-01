@@ -527,10 +527,10 @@ def _concat_avatar_clips(
 
     subtitle_filter = (
         f"subtitles={subtitles_path.as_posix()}"
-        ":force_style='FontName=DejaVu Sans,FontSize=22,"
+        ":force_style='FontName=DejaVu Sans,FontSize=16,"
         "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
-        "Outline=2,Shadow=1,BackColour=&H80000000,"
-        "BorderStyle=4,MarginV=30'"
+        "Outline=3,Shadow=2,"
+        "BorderStyle=1,MarginV=80'"
     )
 
     cmd = [
@@ -650,13 +650,13 @@ def render_video(
                 last = scene_clips[-1]
                 handle.write(f"file '{last.as_posix()}'\n")
 
-        # Build subtitle filter with ASS-style force_style for better appearance
+        # Build subtitle filter with ASS-style force_style for professional faceless-reel appearance
         subtitle_filter = (
             f"subtitles={subtitles_path.as_posix()}"
-            ":force_style='FontName=DejaVu Sans,FontSize=22,"
+            ":force_style='FontName=DejaVu Sans,FontSize=16,"
             "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
-            "Outline=2,Shadow=1,BackColour=&H80000000,"
-            "BorderStyle=4,MarginV=30'"
+            "Outline=3,Shadow=2,"
+            "BorderStyle=1,MarginV=80'"
         )
 
         # Add per-scene fade-in/fade-out transitions when clips are still images

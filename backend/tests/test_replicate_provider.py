@@ -61,7 +61,7 @@ def test_provider_default_anime_style_is_true():
 # Tests: _create_prediction
 # ---------------------------------------------------------------------------
 
-def test_create_prediction_uses_models_endpoint_for_unversioned_model(tmp_path):
+def test_create_prediction_uses_models_endpoint_for_unversioned_model():
     """For 'owner/name' models, the /models/{owner}/{name}/predictions endpoint is used."""
     provider = _make_provider(model="minimax/video-01")
     fake_resp = _make_response({
@@ -106,7 +106,6 @@ def test_create_prediction_raises_if_no_polling_url():
 
         with pytest.raises(ValueError, match="missing polling URL"):
             provider._create_prediction("some prompt")
-
 
 # ---------------------------------------------------------------------------
 # Tests: _poll_prediction

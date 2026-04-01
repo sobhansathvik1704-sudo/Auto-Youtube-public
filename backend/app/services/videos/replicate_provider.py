@@ -123,7 +123,7 @@ class ReplicateVideoProvider:
         # Otherwise use the /models/{owner}/{name}/predictions endpoint which
         # always targets the latest deployed version.
         if ":" in self.model:
-            owner_name, version = self.model.split(":", 1)
+            _, version = self.model.split(":", 1)
             payload["version"] = version
             url = f"{_API_BASE}/predictions"
         else:

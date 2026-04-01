@@ -880,6 +880,7 @@ def render_video(
             video_generated = False
             if video_provider_instance is not None:
                 raw_video_path = clips_dir / f"scene_{scene.scene_index:03d}_raw.mp4"
+                # Priority: dedicated visual_prompt > narration text > on-screen text > default
                 visual_prompt = (
                     getattr(scene, "visual_prompt", None)
                     or getattr(scene, "narration_text", None)

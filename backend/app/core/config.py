@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     gemini_model_name: str = "gemini-2.0-flash"
 
     tts_provider: str = "local"
-    tts_voice: str = "en-IN-Neural2-D"  # Best Indian English Neural2 voice for narration
+    tts_voice: str = "en-IN-Journey-D"  # Best Indian English Journey voice for narration
     tts_speaking_rate: float = 1.0  # Speaking rate (0.25-4.0, 1.0 = normal)
 
     @field_validator("tts_speaking_rate")

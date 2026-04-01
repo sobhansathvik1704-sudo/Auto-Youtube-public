@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import axios from "axios";
 import { authApi } from "@/lib/api";
 import { setToken, isAuthenticated } from "@/lib/auth";
 
@@ -27,8 +28,15 @@ export default function LoginPage() {
       const data = await authApi.login(email, password);
       setToken(data.access_token);
       router.replace("/");
-    } catch {
-      setError("Invalid email or password. Please try again.");
+    } catch (err: unknown) {
+      if (axios.isAxiosError(err)) {
+        setError(
+          err.response?.data?.detail ??
+            "Invalid email or password. Please try again."
+        );
+      } else {
+        setError("Invalid email or password. Please try again.");
+      }
     } finally {
       setLoading(false);
     }

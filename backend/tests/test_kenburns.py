@@ -133,13 +133,25 @@ class TestKenBurnsFfmpegCall:
         idx = cmd.index("-c:v")
         assert cmd[idx + 1] == "libx264"
 
+    def test_command_uses_crf_18(self, tmp_path: Path):
+        _, cmd = _run_clip(tmp_path, "zoom_in")
+        assert "-crf" in cmd
+        idx = cmd.index("-crf")
+        assert cmd[idx + 1] == "18"
+
+    def test_command_uses_preset_slow(self, tmp_path: Path):
+        _, cmd = _run_clip(tmp_path, "zoom_in")
+        assert "-preset" in cmd
+        idx = cmd.index("-preset")
+        assert cmd[idx + 1] == "slow"
+
 
 # ---------------------------------------------------------------------------
-# Tests: zoompan filter content per effect
+# Tests: video filter chain content per effect
 # ---------------------------------------------------------------------------
 
-def _get_zoompan_filter(cmd: list) -> str:
-    """Extract the zoompan filter string from the FFmpeg command list."""
+def _get_vf_arg(cmd: list) -> str:
+    """Extract the full -vf filter chain string from the FFmpeg command list."""
     vf_idx = cmd.index("-vf")
     return cmd[vf_idx + 1]
 
@@ -147,78 +159,78 @@ def _get_zoompan_filter(cmd: list) -> str:
 class TestKenBurnsZoomInEffect:
     def test_zoom_in_uses_zoompan_filter(self, tmp_path: Path):
         _, cmd = _run_clip(tmp_path, "zoom_in")
-        assert "zoompan" in _get_zoompan_filter(cmd)
+        assert "zoompan" in _get_vf_arg(cmd)
 
     def test_zoom_in_increases_zoom(self, tmp_path: Path):
         _, cmd = _run_clip(tmp_path, "zoom_in")
-        zoompan = _get_zoompan_filter(cmd)
+        zoompan = _get_vf_arg(cmd)
         # zoom_in adds to the zoom value (zoom+)
         assert "zoom+" in zoompan
 
     def test_zoom_in_includes_dimension(self, tmp_path: Path):
         _, cmd = _run_clip(tmp_path, "zoom_in", width=1080, height=1920)
-        zoompan = _get_zoompan_filter(cmd)
+        zoompan = _get_vf_arg(cmd)
         assert "1080x1920" in zoompan
 
 
 class TestKenBurnsZoomOutEffect:
     def test_zoom_out_uses_zoompan_filter(self, tmp_path: Path):
         _, cmd = _run_clip(tmp_path, "zoom_out")
-        assert "zoompan" in _get_zoompan_filter(cmd)
+        assert "zoompan" in _get_vf_arg(cmd)
 
     def test_zoom_out_decreases_zoom(self, tmp_path: Path):
         _, cmd = _run_clip(tmp_path, "zoom_out")
-        zoompan = _get_zoompan_filter(cmd)
+        zoompan = _get_vf_arg(cmd)
         # zoom_out starts high and decreases (zoom-0.001 or max(1.001,...))
         assert "zoom-0.001" in zoompan or "max(1.001" in zoompan
 
     def test_zoom_out_includes_dimension(self, tmp_path: Path):
         _, cmd = _run_clip(tmp_path, "zoom_out", width=1080, height=1920)
-        zoompan = _get_zoompan_filter(cmd)
+        zoompan = _get_vf_arg(cmd)
         assert "1080x1920" in zoompan
 
 
 class TestKenBurnsPanRightEffect:
     def test_pan_right_uses_zoompan_filter(self, tmp_path: Path):
         _, cmd = _run_clip(tmp_path, "pan_right")
-        assert "zoompan" in _get_zoompan_filter(cmd)
+        assert "zoompan" in _get_vf_arg(cmd)
 
     def test_pan_right_has_x_expression(self, tmp_path: Path):
         _, cmd = _run_clip(tmp_path, "pan_right")
-        zoompan = _get_zoompan_filter(cmd)
+        zoompan = _get_vf_arg(cmd)
         assert "x=" in zoompan
 
     def test_pan_right_moves_rightward(self, tmp_path: Path):
         _, cmd = _run_clip(tmp_path, "pan_right")
-        zoompan = _get_zoompan_filter(cmd)
+        zoompan = _get_vf_arg(cmd)
         # Pan right increments x: x+1
         assert "x+1" in zoompan
 
     def test_pan_right_includes_dimension(self, tmp_path: Path):
         _, cmd = _run_clip(tmp_path, "pan_right", width=1080, height=1920)
-        zoompan = _get_zoompan_filter(cmd)
+        zoompan = _get_vf_arg(cmd)
         assert "1080x1920" in zoompan
 
 
 class TestKenBurnsPanLeftEffect:
     def test_pan_left_uses_zoompan_filter(self, tmp_path: Path):
         _, cmd = _run_clip(tmp_path, "pan_left")
-        assert "zoompan" in _get_zoompan_filter(cmd)
+        assert "zoompan" in _get_vf_arg(cmd)
 
     def test_pan_left_has_x_expression(self, tmp_path: Path):
         _, cmd = _run_clip(tmp_path, "pan_left")
-        zoompan = _get_zoompan_filter(cmd)
+        zoompan = _get_vf_arg(cmd)
         assert "x=" in zoompan
 
     def test_pan_left_moves_leftward(self, tmp_path: Path):
         _, cmd = _run_clip(tmp_path, "pan_left")
-        zoompan = _get_zoompan_filter(cmd)
+        zoompan = _get_vf_arg(cmd)
         # Pan left decrements x: x-1
         assert "x-1" in zoompan
 
     def test_pan_left_includes_dimension(self, tmp_path: Path):
         _, cmd = _run_clip(tmp_path, "pan_left", width=1080, height=1920)
-        zoompan = _get_zoompan_filter(cmd)
+        zoompan = _get_vf_arg(cmd)
         assert "1080x1920" in zoompan
 
 
@@ -229,7 +241,7 @@ class TestKenBurnsPanLeftEffect:
 class TestKenBurnsRandomEffect:
     def test_none_effect_produces_valid_zoompan(self, tmp_path: Path):
         _, cmd = _run_clip(tmp_path, None)
-        zoompan = _get_zoompan_filter(cmd)
+        zoompan = _get_vf_arg(cmd)
         assert "zoompan" in zoompan
 
     def test_none_effect_produces_variety_over_many_calls(self, tmp_path: Path):
@@ -243,7 +255,7 @@ class TestKenBurnsRandomEffect:
                 mock_run.return_value = MagicMock(returncode=0)
                 _image_to_kenburns_clip(image_path, 4.0, output_path, 1080, 1920, effect=None)
                 cmd = mock_run.call_args[0][0]
-                zoompan = _get_zoompan_filter(cmd)
+                zoompan = _get_vf_arg(cmd)
                 # Record a prefix to distinguish effects
                 seen_filters.add(zoompan[:40])
 
@@ -265,8 +277,25 @@ class TestKenBurnsDimensions:
     ])
     def test_filter_embeds_correct_dimensions(self, tmp_path: Path, width: int, height: int):
         _, cmd = _run_clip(tmp_path, "zoom_in", width=width, height=height)
-        zoompan = _get_zoompan_filter(cmd)
+        zoompan = _get_vf_arg(cmd)
         assert f"{width}x{height}" in zoompan
+
+    @pytest.mark.parametrize("width,height", [
+        (1080, 1920),
+        (1920, 1080),
+        (720, 1280),
+    ])
+    def test_vf_includes_prescale_at_double_resolution(self, tmp_path: Path, width: int, height: int):
+        _, cmd = _run_clip(tmp_path, "zoom_in", width=width, height=height)
+        vf = _get_vf_arg(cmd)
+        assert f"scale={width * 2}:{height * 2}" in vf
+
+    def test_prescale_appears_before_zoompan(self, tmp_path: Path):
+        _, cmd = _run_clip(tmp_path, "zoom_in", width=1080, height=1920)
+        vf = _get_vf_arg(cmd)
+        scale_pos = vf.index("scale=")
+        zoompan_pos = vf.index("zoompan=")
+        assert scale_pos < zoompan_pos
 
 
 # ---------------------------------------------------------------------------

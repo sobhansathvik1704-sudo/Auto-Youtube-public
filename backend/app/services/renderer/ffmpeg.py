@@ -677,6 +677,11 @@ def _image_to_kenburns_clip(
     fps = settings.video_render_fps
     total_frames = max(1, int(duration_s * fps))
 
+    # Pre-scale the input to 2× the target resolution so the zoompan filter has
+    # enough source pixels to sample from when zooming/panning, which prevents
+    # the blurriness/interpolation artefacts caused by upscaling a 1:1 canvas.
+    prescale = f"scale={width * 2}:{height * 2}"
+
     if effect == "zoom_in":
         zoompan = (
             f"zoompan=z='min(zoom+0.001,1.15)'"
@@ -704,15 +709,19 @@ def _image_to_kenburns_clip(
             f":d={total_frames}:s={width}x{height}:fps={fps}"
         )
 
+    vf = f"{prescale},{zoompan}"
+
     cmd = [
         settings.ffmpeg_bin,
         "-y",
         "-loop", "1",
         "-i", str(image_path),
-        "-vf", zoompan,
+        "-vf", vf,
         "-t", str(duration_s),
         "-pix_fmt", "yuv420p",
         "-c:v", "libx264",
+        "-crf", "18",
+        "-preset", "slow",
         str(output_path),
     ]
     subprocess.run(cmd, check=True, capture_output=True)
@@ -740,6 +749,8 @@ def _concat_avatar_clips(
         "-i", str(audio_path),
         "-pix_fmt", "yuv420p",
         "-c:v", "libx264",
+        "-crf", "18",
+        "-preset", "slow",
         "-c:a", "aac",
         "-shortest",
         str(output_path),
@@ -875,6 +886,10 @@ def render_video(
             "yuv420p",
             "-c:v",
             "libx264",
+            "-crf",
+            "18",
+            "-preset",
+            "slow",
             "-c:a",
             "aac",
             "-shortest",

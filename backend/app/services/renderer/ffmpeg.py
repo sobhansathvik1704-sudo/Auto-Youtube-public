@@ -514,24 +514,15 @@ def _image_to_kenburns_clip(
 
 def _concat_avatar_clips(
     scene_clips: list[Path],
-    subtitles_path: Path,
     audio_path: Path,
     output_path: Path,
 ) -> None:
-    """Concatenate D-ID avatar video clips, overlay subtitles, and mix in TTS audio."""
+    """Concatenate D-ID avatar video clips and mix in TTS audio."""
     settings = get_settings()
     concat_file = output_path.parent / "avatar_concat.txt"
     with concat_file.open("w", encoding="utf-8") as fh:
         for clip in scene_clips:
             fh.write(f"file '{clip.as_posix()}'\n")
-
-    subtitle_filter = (
-        f"subtitles={subtitles_path.as_posix()}"
-        ":force_style='FontName=DejaVu Sans,FontSize=16,"
-        "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
-        "Outline=3,Shadow=2,"
-        "BorderStyle=1,MarginV=80'"
-    )
 
     cmd = [
         settings.ffmpeg_bin,
@@ -540,7 +531,6 @@ def _concat_avatar_clips(
         "-safe", "0",
         "-i", str(concat_file),
         "-i", str(audio_path),
-        "-vf", subtitle_filter,
         "-pix_fmt", "yuv420p",
         "-c:v", "libx264",
         "-c:a", "aac",
@@ -606,7 +596,7 @@ def render_video(
                 )
                 scene_clips.append(clip_path)
 
-        _concat_avatar_clips(scene_clips, subtitles_path, audio_path, output_path)
+        _concat_avatar_clips(scene_clips, audio_path, output_path)
 
     else:
         # --- Static slide path (default) ---
@@ -650,22 +640,12 @@ def render_video(
                 last = scene_clips[-1]
                 handle.write(f"file '{last.as_posix()}'\n")
 
-        # Build subtitle filter with ASS-style force_style for professional faceless-reel appearance
-        subtitle_filter = (
-            f"subtitles={subtitles_path.as_posix()}"
-            ":force_style='FontName=DejaVu Sans,FontSize=16,"
-            "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
-            "Outline=3,Shadow=2,"
-            "BorderStyle=1,MarginV=80'"
-        )
-
         # Add per-scene fade-in/fade-out transitions when clips are still images
         has_stills = any(c.suffix == ".png" for c in scene_clips)
+        vf_filter: str | None = None
         if has_stills:
             fade_filter = _build_fade_filter(scenes)
-            vf_filter = f"{fade_filter},{subtitle_filter}" if fade_filter else subtitle_filter
-        else:
-            vf_filter = subtitle_filter
+            vf_filter = fade_filter if fade_filter else None
 
         cmd = [
             settings.ffmpeg_bin,
@@ -678,8 +658,10 @@ def render_video(
             str(concat_file),
             "-i",
             str(audio_path),
-            "-vf",
-            vf_filter,
+        ]
+        if vf_filter:
+            cmd.extend(["-vf", vf_filter])
+        cmd.extend([
             "-r",
             str(settings.video_render_fps),
             "-pix_fmt",
@@ -690,7 +672,7 @@ def render_video(
             "aac",
             "-shortest",
             str(output_path),
-        ]
+        ])
         subprocess.run(cmd, check=True, capture_output=True)
 
     asset = Asset(

@@ -84,6 +84,13 @@ class Settings(BaseSettings):
     hf_image_model: str = "black-forest-labs/FLUX.1-schnell"
     hf_inference_provider: str = "hf-inference"  # "hf-inference", "fal-ai", "replicate", or "together"
 
+    # Text-to-Video generation – set VIDEO_PROVIDER=replicate to enable AI video backgrounds
+    # "none" disables video generation and falls back to the Ken Burns image pipeline
+    video_provider: str = "none"
+    replicate_api_token: str = ""  # Get yours at https://replicate.com/account/api-tokens
+    # Replicate model identifier for text-to-video generation
+    replicate_video_model: str = "minimax/video-01"
+
     model_config = SettingsConfigDict(
         env_file=(".env.example", ".env"),
         env_file_encoding="utf-8",

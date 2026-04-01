@@ -1,139 +1,102 @@
 import logging
-import time
 from pathlib import Path
-
-import httpx
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Fallback chain: try each model in order if the previous one returns 410 Gone.
+# Fallback chain: try each model in order until one succeeds.
 _FALLBACK_MODELS = [
     "black-forest-labs/FLUX.1-schnell",
+    "stabilityai/stable-diffusion-xl-base-1.0",
+    "ByteDance/SDXL-Lightning",
     "CompVis/stable-diffusion-v1-4",
-    "stabilityai/stable-diffusion-2-1",
+]
+
+# Fallback chain: try each provider in order until one succeeds.
+_FALLBACK_PROVIDERS = [
+    "hf-inference",
+    "fal-ai",
+    "replicate",
 ]
 
 
 class HuggingFaceImageProvider:
-    """Generate cinematic images via the HuggingFace Inference API (free tier)."""
+    """Generate images via HuggingFace Inference Providers (new API)."""
 
-    def __init__(self, api_token: str, model: str = "black-forest-labs/FLUX.1-schnell") -> None:
+    def __init__(
+        self,
+        api_token: str,
+        model: str = "black-forest-labs/FLUX.1-schnell",
+        provider: str = "hf-inference",
+    ) -> None:
         self.api_token = api_token
         self.model = model
-        self.headers = {"Authorization": f"Bearer {api_token}"}
+        self.provider = provider
 
-    def _api_url(self, model: str) -> str:
-        return f"https://api-inference.huggingface.co/models/{model}"
-
-    def generate_image(self, prompt: str, output_path: Path) -> Path | None:
-        """Generate a cinematic image from *prompt*.
-
-        Returns the local *output_path* on success, or ``None`` if all
-        attempts fail so the caller can fall through to the next provider.
-
-        If the configured model returns 410 Gone (permanently removed), the
-        provider automatically tries each model in ``_FALLBACK_MODELS``.
-        """
+    def generate_image(self, prompt: str, output_path: Path) -> Optional[Path]:
+        """Generate a cinematic image. Returns output_path on success, None on failure."""
         cinematic_prompt = (
             f"cinematic, dramatic lighting, 4K, film still, professional photography, {prompt}"
         )
 
-        # Build the ordered list of models to try: configured model first,
-        # then any fallback models not already in the list.
         models_to_try = [self.model] + [m for m in _FALLBACK_MODELS if m != self.model]
+        providers_to_try = [self.provider] + [p for p in _FALLBACK_PROVIDERS if p != self.provider]
 
-        for model in models_to_try:
-            result = self._try_model(model, cinematic_prompt, output_path, prompt)
-            if result is not None:
-                return result
+        for provider in providers_to_try:
+            for model in models_to_try:
+                result = self._try_generate(provider, model, cinematic_prompt, output_path, prompt)
+                if result is not None:
+                    return result
 
         logger.warning(
-            "HuggingFace image generation failed for all models for prompt: %.50s…", prompt
+            "HuggingFace image generation failed for all models and providers for prompt: %.50s…",
+            prompt,
         )
         return None
 
-    def _try_model(
-        self, model: str, cinematic_prompt: str, output_path: Path, original_prompt: str
-    ) -> Path | None:
-        """Try to generate an image with a single *model*.  Returns the path on
-        success, ``None`` on permanent failure (410) or exhausted retries.
-        """
-        api_url = self._api_url(model)
+    def _try_generate(
+        self, provider: str, model: str, cinematic_prompt: str, output_path: Path, original_prompt: str
+    ) -> Optional[Path]:
+        try:
+            from huggingface_hub import InferenceClient  # noqa: PLC0415
 
-        for attempt in range(3):
-            try:
-                resp = httpx.post(
-                    api_url,
-                    headers=self.headers,
-                    json={
-                        "inputs": cinematic_prompt,
-                        "parameters": {"width": 1280, "height": 720},
-                    },
-                    timeout=60,
+            client = InferenceClient(provider=provider, api_key=self.api_token)
+
+            logger.info(
+                "Trying HuggingFace image generation: provider=%r model=%r prompt=%.50s…",
+                provider, model, original_prompt,
+            )
+
+            image = client.text_to_image(
+                cinematic_prompt,
+                model=model,
+            )
+
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            image.save(str(output_path))
+
+            logger.info(
+                "Generated AI image via provider=%r model=%r for prompt: %.50s… → %s",
+                provider, model, original_prompt, output_path,
+            )
+            return output_path
+
+        except Exception as exc:
+            error_str = str(exc).lower()
+            if "404" in error_str or "not found" in error_str or "not available" in error_str:
+                logger.debug(
+                    "Model %r not available on provider %r: %s", model, provider, exc
                 )
-
-                if resp.status_code == 410:
-                    # Model permanently removed — skip to the next fallback
-                    logger.warning(
-                        "HuggingFace model %r returned 410 Gone (model removed). "
-                        "Update your HF_IMAGE_MODEL setting. Trying next fallback…",
-                        model,
-                    )
-                    return None
-
-                if resp.status_code == 503:
-                    # Model is loading (cold start) — wait and retry
-                    try:
-                        wait = resp.json().get("estimated_time", 20)
-                    except Exception:
-                        wait = 20
-                    wait = min(float(wait), 30)
-                    logger.info(
-                        "HuggingFace model %r loading, waiting %.0fs (attempt %d)…",
-                        model,
-                        wait,
-                        attempt + 1,
-                    )
-                    time.sleep(wait)
-                    continue
-
-                if resp.status_code == 429:
-                    # Rate-limited — exponential back-off
-                    wait = 2 ** attempt
-                    logger.warning(
-                        "HuggingFace rate limit (429) on model %r attempt %d, retrying in %ds…",
-                        model,
-                        attempt + 1,
-                        wait,
-                    )
-                    time.sleep(wait)
-                    continue
-
-                resp.raise_for_status()
-
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-                output_path.write_bytes(resp.content)
-                logger.info(
-                    "Generated AI image via model %r for prompt: %.50s… → %s",
-                    model,
-                    original_prompt,
-                    output_path,
-                )
-                return output_path
-
-            except Exception as exc:
+            elif "429" in error_str or "rate" in error_str:
                 logger.warning(
-                    "HuggingFace image generation model %r attempt %d failed: %s",
-                    model,
-                    attempt + 1,
-                    exc,
+                    "Rate limited on provider=%r model=%r: %s", provider, model, exc
                 )
-                if attempt < 2:
-                    time.sleep(2 ** attempt)
-
-        logger.warning(
-            "HuggingFace image generation failed after 3 attempts for model %r, prompt: %.50s…",
-            model,
-            original_prompt,
-        )
-        return None
+            elif "410" in error_str or "gone" in error_str:
+                logger.warning(
+                    "Model %r is gone on provider %r: %s", model, provider, exc
+                )
+            else:
+                logger.warning(
+                    "HuggingFace error provider=%r model=%r: %s", provider, model, exc
+                )
+            return None

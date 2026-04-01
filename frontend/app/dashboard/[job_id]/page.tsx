@@ -435,6 +435,65 @@ function SEOPreview({ seo }: { seo: SEOMetadata }) {
   );
 }
 
+/** Map a scene_type to a human-readable badge label + colour class. */
+function SceneTypeBadge({ sceneType }: { sceneType: string }) {
+  const config: Record<string, { label: string; classes: string }> = {
+    hook: {
+      label: "🎯 Hook",
+      classes:
+        "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300",
+    },
+    beat: {
+      label: "🔥 Beat",
+      classes:
+        "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
+    },
+    takeaway: {
+      label: "💡 Takeaway",
+      classes:
+        "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300",
+    },
+    intro: {
+      label: "▶ Intro",
+      classes:
+        "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300",
+    },
+    outro: {
+      label: "⏹ Outro",
+      classes:
+        "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300",
+    },
+    bullet_explainer: {
+      label: "📌 Explainer",
+      classes:
+        "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-300",
+    },
+    icon_compare: {
+      label: "⚖️ Compare",
+      classes:
+        "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300",
+    },
+    code_card: {
+      label: "💻 Code",
+      classes:
+        "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
+    },
+  };
+  const { label, classes } =
+    config[sceneType] ?? {
+      label: sceneType.replace(/_/g, " "),
+      classes:
+        "bg-zinc-100 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-300",
+    };
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${classes}`}
+    >
+      {label}
+    </span>
+  );
+}
+
 function ScriptReviewPanel({
   jobId,
   onApproved,
@@ -468,19 +527,26 @@ function ScriptReviewPanel({
     }
   }
 
+  /** Count beat scenes for display numbering. */
+  function beatNumber(scenes: SceneRead[], currentIdx: number): number {
+    return scenes
+      .slice(0, currentIdx + 1)
+      .filter((s) => s.scene_type === "beat").length;
+  }
+
   return (
     <div className="rounded-2xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 shadow-sm p-6 mb-6">
-      <div className="flex items-start justify-between mb-4">
+      <div className="flex items-start justify-between mb-5">
         <div>
           <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
             📋 Script Review
           </h2>
           <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-            Review the generated scenes below. Click{" "}
-            <strong>Approve &amp; Generate Video</strong> to start rendering.
+            Review the Shorts scene plan below — hook, beats, and takeaway.
+            Click <strong>Approve &amp; Generate Video</strong> when ready.
           </p>
         </div>
-        <span className="inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 px-2.5 py-0.5 text-xs font-medium">
+        <span className="inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 px-2.5 py-0.5 text-xs font-medium whitespace-nowrap">
           Awaiting Approval
         </span>
       </div>
@@ -488,8 +554,19 @@ function ScriptReviewPanel({
       {loadingScenes ? (
         <div className="flex items-center gap-2 text-zinc-500 dark:text-zinc-400 text-sm py-4">
           <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+            <circle
+              className="opacity-25"
+              cx="12"
+              cy="12"
+              r="10"
+              stroke="currentColor"
+              strokeWidth="4"
+            />
+            <path
+              className="opacity-75"
+              fill="currentColor"
+              d="M4 12a8 8 0 018-8v8H4z"
+            />
           </svg>
           Loading scenes…
         </div>
@@ -498,32 +575,67 @@ function ScriptReviewPanel({
           No scenes found. You can still proceed with rendering.
         </p>
       ) : (
-        <div className="flex flex-col gap-4 mb-6">
-          {scenes.map((scene, idx) => (
-            <div
-              key={scene.id}
-              className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-4"
-            >
-              <div className="flex items-center gap-2 mb-2">
-                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 text-xs font-semibold">
-                  {idx + 1}
-                </span>
-                <span className="text-xs font-medium text-zinc-400 dark:text-zinc-500 uppercase tracking-wide">
-                  {Math.round(scene.duration_ms / 1000)}s
-                </span>
+        <div className="flex flex-col gap-3 mb-6">
+          {scenes.map((scene, idx) => {
+            const isHook = scene.scene_type === "hook";
+            const isTakeaway = scene.scene_type === "takeaway";
+            const isBeat = scene.scene_type === "beat";
+            const borderClass = isHook
+              ? "border-yellow-300 dark:border-yellow-700"
+              : isTakeaway
+              ? "border-green-300 dark:border-green-700"
+              : "border-zinc-200 dark:border-zinc-700";
+
+            return (
+              <div
+                key={scene.id}
+                className={`rounded-xl border ${borderClass} bg-white dark:bg-zinc-900 p-4`}
+              >
+                {/* Header row: type badge + scene number + duration */}
+                <div className="flex items-center gap-2 mb-3 flex-wrap">
+                  <SceneTypeBadge sceneType={scene.scene_type} />
+                  {isBeat && (
+                    <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+                      #{beatNumber(scenes, idx)}
+                    </span>
+                  )}
+                  <span className="ml-auto text-xs text-zinc-400 dark:text-zinc-500">
+                    {Math.round(scene.duration_ms / 1000)}s
+                  </span>
+                </div>
+
+                {/* On-screen text — the phrase shown on the video */}
+                {scene.on_screen_text && (
+                  <p
+                    className={`font-semibold leading-tight mb-2 ${
+                      isHook
+                        ? "text-base text-yellow-700 dark:text-yellow-300"
+                        : isTakeaway
+                        ? "text-base text-green-700 dark:text-green-300"
+                        : "text-sm text-zinc-800 dark:text-zinc-100"
+                    }`}
+                  >
+                    {scene.on_screen_text}
+                  </p>
+                )}
+
+                {/* Narration — what gets spoken aloud */}
+                {scene.narration_text &&
+                  scene.narration_text !== scene.on_screen_text && (
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400 italic border-t border-zinc-100 dark:border-zinc-800 pt-2 mt-2">
+                      🎙 {scene.narration_text}
+                    </p>
+                  )}
+
+                {/* Visual concept hint */}
+                {scene.visual_prompt && (
+                  <p className="text-xs text-zinc-400 dark:text-zinc-500 border-t border-zinc-100 dark:border-zinc-800 pt-2 mt-2 truncate">
+                    🖼 {scene.visual_prompt}
+                  </p>
+                )}
               </div>
-              {scene.on_screen_text && (
-                <p className="text-sm text-zinc-800 dark:text-zinc-200 leading-relaxed mb-2">
-                  {scene.on_screen_text}
-                </p>
-              )}
-              {scene.narration_text && scene.narration_text !== scene.on_screen_text && (
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 italic border-t border-zinc-100 dark:border-zinc-800 pt-2 mt-2">
-                  🎙 {scene.narration_text}
-                </p>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

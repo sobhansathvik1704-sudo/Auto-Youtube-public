@@ -77,7 +77,9 @@ class Settings(BaseSettings):
     did_voice_id: str = "en-US-JennyNeural"  # Microsoft Azure voice
     thumbnail_provider: str = "pillow"  # "pillow" or "dalle"
     pexels_api_key: str = ""
-    image_provider: str = "gradient"  # "huggingface", "pexels", or "gradient"
+    # "pollinations" (free, no key), "huggingface", "pexels", or "gradient"
+    image_provider: str = "pollinations"
+    pollinations_model: str = "flux"  # Pollinations model: "flux" (default) or "turbo"
     hf_api_token: str = ""  # HuggingFace API token (free)
     hf_image_model: str = "black-forest-labs/FLUX.1-schnell"
     hf_inference_provider: str = "hf-inference"  # "hf-inference", "fal-ai", "replicate", or "together"

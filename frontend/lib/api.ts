@@ -93,6 +93,12 @@ export interface SceneRead {
   created_at: string;
 }
 
+export interface SceneUpdate {
+  on_screen_text?: string | null;
+  narration_text?: string | null;
+  visual_prompt?: string | null;
+}
+
 export interface ScriptRead {
   id: string;
   video_job_id: string;
@@ -210,6 +216,11 @@ export const videoJobsApi = {
 
   getScenes: (id: string): Promise<SceneRead[]> =>
     apiClient.get<SceneRead[]>(`/video-jobs/${id}/scenes`).then((r) => r.data),
+
+  updateScene: (jobId: string, sceneId: string, payload: SceneUpdate): Promise<SceneRead> =>
+    apiClient
+      .patch<SceneRead>(`/video-jobs/${jobId}/scenes/${sceneId}`, payload)
+      .then((r) => r.data),
 
   getScript: (id: string): Promise<ScriptRead> =>
     apiClient.get<ScriptRead>(`/video-jobs/${id}/script`).then((r) => r.data),

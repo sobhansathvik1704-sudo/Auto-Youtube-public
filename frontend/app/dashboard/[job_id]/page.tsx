@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { videoJobsApi, VideoJob, SEOMetadata, SceneRead } from "@/lib/api";
+import { videoJobsApi, VideoJob, SEOMetadata, SceneRead, SceneUpdate } from "@/lib/api";
 import { isAuthenticated, removeToken, getToken } from "@/lib/auth";
 
 const PIPELINE_STEPS = [
@@ -506,6 +506,13 @@ function ScriptReviewPanel({
   const [approving, setApproving] = useState(false);
   const [approveError, setApproveError] = useState("");
 
+  // Per-scene edit state: map from scene.id → draft values
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<SceneUpdate>({});
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<Record<string, string>>({});
+  const [savedId, setSavedId] = useState<string | null>(null);
+
   useEffect(() => {
     setLoadingScenes(true);
     videoJobsApi
@@ -527,6 +534,42 @@ function ScriptReviewPanel({
     }
   }
 
+  function startEdit(scene: SceneRead) {
+    setEditingId(scene.id);
+    setSavedId(null);
+    setDraft({
+      on_screen_text: scene.on_screen_text ?? "",
+      narration_text: scene.narration_text ?? "",
+      visual_prompt: scene.visual_prompt ?? "",
+    });
+    setSaveError((prev) => ({ ...prev, [scene.id]: "" }));
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setDraft({});
+  }
+
+  async function saveEdit(sceneId: string) {
+    setSavingId(sceneId);
+    setSaveError((prev) => ({ ...prev, [sceneId]: "" }));
+    try {
+      const updated = await videoJobsApi.updateScene(jobId, sceneId, draft);
+      setScenes((prev) => prev.map((s) => (s.id === sceneId ? updated : s)));
+      setEditingId(null);
+      setDraft({});
+      setSavedId(sceneId);
+      // Clear the "Saved" indicator after 2 s
+      setTimeout(() => setSavedId((cur) => (cur === sceneId ? null : cur)), 2000);
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error ? err.message : "Save failed. Please try again.";
+      setSaveError((prev) => ({ ...prev, [sceneId]: msg }));
+    } finally {
+      setSavingId(null);
+    }
+  }
+
   /** Count beat scenes for display numbering. */
   function beatNumber(scenes: SceneRead[], currentIdx: number): number {
     return scenes
@@ -542,8 +585,10 @@ function ScriptReviewPanel({
             📋 Script Review
           </h2>
           <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-            Review the Shorts scene plan below — hook, beats, and takeaway.
-            Click <strong>Approve &amp; Generate Video</strong> when ready.
+            Review and edit the Shorts scene plan below — hook, beats, and
+            takeaway. Click <strong>✏ Edit</strong> on any scene to adjust the
+            text or image prompt, then{" "}
+            <strong>Approve &amp; Generate Video</strong> when ready.
           </p>
         </div>
         <span className="inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 px-2.5 py-0.5 text-xs font-medium whitespace-nowrap">
@@ -585,13 +630,16 @@ function ScriptReviewPanel({
               : isTakeaway
               ? "border-green-300 dark:border-green-700"
               : "border-zinc-200 dark:border-zinc-700";
+            const isEditing = editingId === scene.id;
+            const isSaving = savingId === scene.id;
+            const wasSaved = savedId === scene.id;
 
             return (
               <div
                 key={scene.id}
                 className={`rounded-xl border ${borderClass} bg-white dark:bg-zinc-900 p-4`}
               >
-                {/* Header row: type badge + scene number + duration */}
+                {/* Header row: type badge + scene number + duration + edit button */}
                 <div className="flex items-center gap-2 mb-3 flex-wrap">
                   <SceneTypeBadge sceneType={scene.scene_type} />
                   {isBeat && (
@@ -599,39 +647,137 @@ function ScriptReviewPanel({
                       #{beatNumber(scenes, idx)}
                     </span>
                   )}
-                  <span className="ml-auto text-xs text-zinc-400 dark:text-zinc-500">
+                  <span className="text-xs text-zinc-400 dark:text-zinc-500">
                     {Math.round(scene.duration_ms / 1000)}s
                   </span>
+                  <div className="ml-auto flex items-center gap-2">
+                    {wasSaved && !isEditing && (
+                      <span className="text-xs text-green-600 dark:text-green-400 font-medium">
+                        ✓ Saved
+                      </span>
+                    )}
+                    {!isEditing ? (
+                      <button
+                        onClick={() => startEdit(scene)}
+                        className="text-xs px-2.5 py-1 rounded-md bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-300 font-medium transition-colors"
+                      >
+                        ✏ Edit
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => saveEdit(scene.id)}
+                          disabled={isSaving}
+                          className="text-xs px-2.5 py-1 rounded-md bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-medium transition-colors"
+                        >
+                          {isSaving ? "Saving…" : "💾 Save"}
+                        </button>
+                        <button
+                          onClick={cancelEdit}
+                          disabled={isSaving}
+                          className="text-xs px-2.5 py-1 rounded-md bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-300 font-medium transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
-                {/* On-screen text — the phrase shown on the video */}
-                {scene.on_screen_text && (
-                  <p
-                    className={`font-semibold leading-tight mb-2 ${
-                      isHook
-                        ? "text-base text-yellow-700 dark:text-yellow-300"
-                        : isTakeaway
-                        ? "text-base text-green-700 dark:text-green-300"
-                        : "text-sm text-zinc-800 dark:text-zinc-100"
-                    }`}
-                  >
-                    {scene.on_screen_text}
+                {saveError[scene.id] && (
+                  <p className="mb-2 text-xs text-red-600 dark:text-red-400">
+                    {saveError[scene.id]}
                   </p>
                 )}
 
-                {/* Narration — what gets spoken aloud */}
-                {scene.narration_text &&
-                  scene.narration_text !== scene.on_screen_text && (
-                    <p className="text-xs text-zinc-500 dark:text-zinc-400 italic border-t border-zinc-100 dark:border-zinc-800 pt-2 mt-2">
-                      🎙 {scene.narration_text}
-                    </p>
-                  )}
+                {isEditing ? (
+                  /* ── Editable form ── */
+                  <div className="flex flex-col gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-500 dark:text-zinc-400 mb-1 uppercase tracking-wide">
+                        On-screen text
+                      </label>
+                      <input
+                        type="text"
+                        value={draft.on_screen_text ?? ""}
+                        onChange={(e) =>
+                          setDraft((d) => ({
+                            ...d,
+                            on_screen_text: e.target.value,
+                          }))
+                        }
+                        className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-3 py-1.5 text-sm text-zinc-800 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                        placeholder="Short phrase shown on screen (3–7 words)"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-500 dark:text-zinc-400 mb-1 uppercase tracking-wide">
+                        Narration / voiceover
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={draft.narration_text ?? ""}
+                        onChange={(e) =>
+                          setDraft((d) => ({
+                            ...d,
+                            narration_text: e.target.value,
+                          }))
+                        }
+                        className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-3 py-1.5 text-sm text-zinc-800 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-none"
+                        placeholder="Spoken voiceover text"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-500 dark:text-zinc-400 mb-1 uppercase tracking-wide">
+                        Image prompt
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={draft.visual_prompt ?? ""}
+                        onChange={(e) =>
+                          setDraft((d) => ({
+                            ...d,
+                            visual_prompt: e.target.value,
+                          }))
+                        }
+                        className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-3 py-1.5 text-sm text-zinc-800 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-none"
+                        placeholder="Describe the image to generate for this scene"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  /* ── Read-only view ── */
+                  <>
+                    {/* On-screen text — the phrase shown on the video */}
+                    {scene.on_screen_text && (
+                      <p
+                        className={`font-semibold leading-tight mb-2 ${
+                          isHook
+                            ? "text-base text-yellow-700 dark:text-yellow-300"
+                            : isTakeaway
+                            ? "text-base text-green-700 dark:text-green-300"
+                            : "text-sm text-zinc-800 dark:text-zinc-100"
+                        }`}
+                      >
+                        {scene.on_screen_text}
+                      </p>
+                    )}
 
-                {/* Visual concept hint */}
-                {scene.visual_prompt && (
-                  <p className="text-xs text-zinc-400 dark:text-zinc-500 border-t border-zinc-100 dark:border-zinc-800 pt-2 mt-2 truncate">
-                    🖼 {scene.visual_prompt}
-                  </p>
+                    {/* Narration — what gets spoken aloud */}
+                    {scene.narration_text &&
+                      scene.narration_text !== scene.on_screen_text && (
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400 italic border-t border-zinc-100 dark:border-zinc-800 pt-2 mt-2">
+                          🎙 {scene.narration_text}
+                        </p>
+                      )}
+
+                    {/* Visual prompt */}
+                    {scene.visual_prompt && (
+                      <p className="text-xs text-zinc-400 dark:text-zinc-500 border-t border-zinc-100 dark:border-zinc-800 pt-2 mt-2 truncate">
+                        🖼 {scene.visual_prompt}
+                      </p>
+                    )}
+                  </>
                 )}
               </div>
             );
@@ -647,15 +793,20 @@ function ScriptReviewPanel({
 
       <button
         onClick={handleApprove}
-        disabled={approving}
+        disabled={approving || editingId !== null}
         className="rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed px-5 py-2.5 text-sm font-semibold text-white transition-colors"
+        title={editingId ? "Save your current edits before approving" : undefined}
       >
         {approving ? "Starting rendering…" : "✅ Approve & Generate Video"}
       </button>
+      {editingId && (
+        <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+          💡 Save or cancel your current edit before approving.
+        </p>
+      )}
     </div>
   );
 }
-
 export default function VideoJobDetailPage() {
   const router = useRouter();
   const params = useParams<{ job_id: string }>();

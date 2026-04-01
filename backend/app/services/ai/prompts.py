@@ -53,17 +53,49 @@ The JSON object must follow this exact schema:
   "estimated_duration_seconds": <total as integer>
 }
 
-Rules:
+ON-SCREEN TEXT rules ("on_screen_text"):
+- MUST be 3–7 words — a punchy phrase or fragment, never a full sentence or paragraph.
+- Prefer the "Concept: detail" format for educational precision and natural readability.
+  BAD:  "Master Linux Control!"
+  BAD:  "The preprocessor expands macros and includes header files before compilation starts."
+  BAD:  "Nice, Renice Priorities"
+  GOOD: "Process priority: nice, renice"
+  GOOD: "Linux states: running, sleeping, zombie"
+  GOOD: "Signals: SIGTERM vs SIGKILL"
+  GOOD: "Preprocessor: expands headers first"
+  GOOD: "Compiler: C → assembly"
+  GOOD: "What are Linux processes?"
+
+VISUAL CONCEPT rules ("visual_concept"):
+- MUST describe a specific, concept-matched visual that instantly communicates the educational idea.
+- Match the visual directly to the technical concept being explained in that beat.
+- For Linux / OS / process management topics, use vocabulary such as:
+    linux terminal window, htop or top output, ps aux command listing, PID numbers,
+    process tree with parent-child nodes, CPU scheduler queue, process state diagram
+    (running/sleeping/zombie), kill command, SIGTERM SIGKILL signal flow,
+    nice renice command, /proc filesystem, context switch diagram, shell prompt
+- For programming / compiler topics, use vocabulary such as:
+    source code file in editor, terminal compiler output, assembly listing,
+    object file and linker, binary executable, syntax-highlighted code, dark terminal
+- For networking topics, use vocabulary such as:
+    network topology diagram, packet flow, TCP/IP layer stack,
+    curl or ping command output, socket connection diagram
+- AVOID generic or misleading imagery — these make the video look like an unfocused AI slideshow:
+  BAD: "bullet explainer", "intro slide", "educational background"
+  BAD: "finance chart", "trading dashboard", "stock market monitor"
+  BAD: "vague cyber corridor", "random glowing orbs", "cinematic human portrait"
+  BAD: "dramatic cinematic background" with no concept connection
+  GOOD: "htop terminal window showing processes with CPU bars, dark green on black"
+  GOOD: "Linux shell with 'ps aux' output listing PIDs, states, and command names"
+  GOOD: "process state diagram: running → sleeping → zombie transitions, dark background"
+  GOOD: "kill command sending SIGTERM to PID, terminal dark theme"
+  GOOD: "C source code file with #include lines highlighted, terminal dark theme"
+  GOOD: "assembly language instructions on a dark screen, low-level code view"
+
+Other rules:
 - ALWAYS generate exactly 1 hook segment (purpose: "hook") + 3–5 beat segments (purpose: "beat") + 1 takeaway segment (purpose: "takeaway").
 - Total segments: 5–7.
 - Each segment duration: 2–4 seconds. Sum should match the requested duration.
-- "on_screen_text" MUST be 3–7 words — a punchy phrase or fragment, never a full sentence or paragraph.
-  BAD: "The preprocessor expands macros and includes header files before compilation starts."
-  GOOD: "Preprocessor expands headers first"
-- "visual_concept" MUST describe what to visualise for that specific beat — avoid generic labels.
-  BAD: "bullet explainer", "intro slide", "educational background"
-  GOOD: "C source code file with #include lines highlighted, terminal dark theme"
-  GOOD: "assembly language instructions on a dark screen, low-level code view"
 - Do NOT include "intro" or "outro" as purpose values — use "hook" and "takeaway" instead.
 - Populate "full_text" by joining all segment narration values with single spaces.
 """

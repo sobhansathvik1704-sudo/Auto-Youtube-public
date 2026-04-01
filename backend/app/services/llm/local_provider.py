@@ -10,68 +10,68 @@ _TARGET_SECONDS_PER_BEAT = 7
 
 # Beat templates: (narration, on_screen_text, visual_concept).
 # Each template is filled with {topic} at generation time.
-# on_screen_text: 3-7 words (punchy phrase).
+# on_screen_text: 3-7 words in "Concept: detail" format for educational precision.
 # visual_concept: specific image description tied to the beat's concept.
 _BEAT_TEMPLATES = [
     (
         "Let's start with the basics of {topic}. This is where it all begins.",
-        "{topic} fundamentals",
-        "educational diagram showing the basic structure of {topic}, clean dark background",
+        "{topic}: the basics",
+        "educational diagram showing the basic structure of {topic}, dark background, clean technical illustration",
     ),
     (
         "Here's how {topic} actually works under the hood.",
         "How {topic} works",
-        "technical diagram or code showing internal workings of {topic}, developer view",
+        "technical diagram or code showing internal workings of {topic}, terminal dark theme, developer view",
     ),
     (
         "The most important use-case for {topic} is in real-world projects.",
-        "Real-world {topic} use-case",
-        "developer working on a project that uses {topic}, laptop screen with code",
+        "{topic}: real-world use case",
+        "developer terminal or code editor showing a real project using {topic}, dark screen",
     ),
     (
         "There are key best practices every developer should follow with {topic}.",
-        "{topic} best practices",
-        "clean code editor showing well-structured {topic} implementation",
+        "{topic}: best practices",
+        "clean code editor with well-structured {topic} implementation, syntax highlighting, dark theme",
     ),
     (
         "One common mistake with {topic} that beginners make every time.",
-        "Avoid this {topic} mistake",
-        "red error message or broken code related to {topic}, dark terminal",
+        "{topic}: avoid this mistake",
+        "red error message or broken code related to {topic}, dark terminal, warning indicator",
     ),
     (
         "Here's a quick comparison: {topic} versus the alternatives.",
         "{topic} vs alternatives",
-        "side-by-side comparison diagram showing {topic} against a competing approach",
+        "side-by-side comparison diagram showing {topic} against a competing approach, minimal dark design",
     ),
     (
         "Pro tip: this one trick with {topic} will save you hours of debugging.",
-        "Pro {topic} tip",
-        "lightbulb or tip graphic with {topic} code snippet on dark background",
+        "{topic}: pro tip",
+        "terminal window with a clever {topic} command or code snippet, dark background",
     ),
     (
         "Step-by-step: how you'd implement {topic} in a real project.",
-        "{topic} step by step",
-        "flowchart or step diagram illustrating the {topic} workflow",
+        "{topic}: step by step",
+        "flowchart or step diagram illustrating the {topic} workflow, dark background, technical style",
     ),
     (
         "Performance matters — here's how {topic} affects speed and efficiency.",
-        "{topic} performance impact",
-        "performance graph or speedometer showing {topic} benchmarks, tech aesthetic",
+        "{topic}: performance impact",
+        "performance benchmark graph or profiler output showing {topic} metrics, dark technical aesthetic",
     ),
     (
         "Security with {topic} is something most tutorials completely skip.",
-        "{topic} security basics",
-        "padlock and shield icon with {topic} code, cybersecurity dark theme",
+        "{topic}: security basics",
+        "terminal showing security-relevant {topic} commands, dark theme, shield or lock icon",
     ),
     (
         "The history of {topic} explains why it works the way it does today.",
-        "{topic} origin story",
-        "timeline graphic showing the evolution of {topic}, retro tech aesthetic",
+        "{topic}: origin story",
+        "timeline diagram showing the evolution of {topic}, retro terminal aesthetic, dark background",
     ),
     (
         "These are the three things every beginner gets wrong about {topic}.",
-        "3 {topic} beginner mistakes",
-        "three numbered cards showing common mistakes with {topic}, minimal design",
+        "{topic}: 3 common mistakes",
+        "three numbered cards or terminal outputs showing common {topic} mistakes, minimal dark design",
     ),
 ]
 
@@ -93,11 +93,11 @@ class LocalLLMProvider(BaseLLMProvider):
         hook_narration = (
             f"Did you know most people misunderstand {topic}? Here's what you actually need to know."
         )
-        hook_on_screen = f"Most people misunderstand {topic}"
+        hook_on_screen = f"What is {topic}, really?"
         takeaway_narration = (
             f"Now you know the key ideas behind {topic}. Follow for more quick tech breakdowns!"
         )
-        takeaway_on_screen = f"Now you know {topic}"
+        takeaway_on_screen = f"{topic}: now you know"
         cta = "Follow for daily tech Shorts!"
 
         per_segment = max(2, duration_seconds // segments_count)
@@ -112,8 +112,8 @@ class LocalLLMProvider(BaseLLMProvider):
                 "narration": hook_narration,
                 "on_screen_text": hook_on_screen,
                 "visual_concept": (
-                    f"question mark graphic with {topic} text, bold cinematic dark background, "
-                    "dramatic lighting, no watermarks"
+                    f"bold question about {topic}, terminal or diagram style, "
+                    "dark educational background, no text, no watermarks"
                 ),
                 "duration_seconds": per_segment,
                 "start_seconds": current,
@@ -151,7 +151,7 @@ class LocalLLMProvider(BaseLLMProvider):
                 "narration": takeaway_narration,
                 "on_screen_text": takeaway_on_screen,
                 "visual_concept": (
-                    f"{topic} concept summarised, glowing light or success moment, "
+                    f"{topic} concept summary, terminal or diagram style, "
                     "clean dark background, no watermarks"
                 ),
                 "duration_seconds": per_segment,

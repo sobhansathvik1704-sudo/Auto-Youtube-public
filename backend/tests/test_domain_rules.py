@@ -128,7 +128,7 @@ class TestBuildDomainContext:
         assert "Subcategory:" in ctx
 
 
-class TestLocalProviderUsesdomainRules:
+class TestLocalProviderUsesDomainRules:
     """Verify that LocalLLMProvider injects domain-specific visual vocab."""
 
     def _generate(self, category: str, subcategory: str | None = None, topic: str = "Test topic") -> dict:

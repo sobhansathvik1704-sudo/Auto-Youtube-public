@@ -383,7 +383,7 @@ _DEFAULT_RULES = DomainRules(
     ),
     script_style="clear explainer; concept → example → takeaway",
     narration_tone="educational and engaging",
-    on_screen_style="short punchy phrase summarising the concept",
+    on_screen_style="short punchy phrase summarizing the concept",
 )
 
 

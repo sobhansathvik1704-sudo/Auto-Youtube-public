@@ -164,20 +164,18 @@ def _build_visual_prompt(
     """
     visual_concept = (segment.get("visual_concept") or "").strip()
 
+    # Fetch domain rules once and reuse
+    domain_rules = get_domain_rules(category, subcategory) if category else None
+
     # 1. Try topic-keyword vocabulary (most specific)
     topic_vocab = _detect_topic_vocabulary(topic)
 
     # 2. Fall back to category/subcategory domain rules vocabulary
-    if not topic_vocab and category:
-        domain_rules = get_domain_rules(category, subcategory)
+    if not topic_vocab and domain_rules:
         topic_vocab = domain_rules.visual_vocab
 
     # Build domain-specific negative keywords
-    domain_avoid = ""
-    if category:
-        domain_rules = get_domain_rules(category, subcategory)
-        domain_avoid = domain_rules.avoid_visuals
-
+    domain_avoid = domain_rules.avoid_visuals if domain_rules else ""
     combined_negative = _NEGATIVE_KEYWORDS
     if domain_avoid:
         combined_negative = f"{_NEGATIVE_KEYWORDS}, {domain_avoid}"

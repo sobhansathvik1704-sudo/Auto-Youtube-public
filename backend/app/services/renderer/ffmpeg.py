@@ -33,6 +33,14 @@ _GRADIENT_SCHEMES: dict[str, tuple[tuple[int, int, int], tuple[int, int, int]]] 
     "bullet_explainer": ((30, 80, 160), (10, 160, 180)), # cobalt → cyan
     "icon_compare": ((120, 30, 60), (200, 80, 20)),      # crimson → amber
 }
+
+# Accent / text colours for Shorts scene types
+_HOOK_TEXT_COLOR: tuple[int, int, int, int] = (255, 220, 50, 255)      # bright yellow
+_HOOK_ACCENT_COLOR: tuple[int, int, int, int] = (255, 200, 50, 200)    # warm yellow
+_BEAT_TEXT_COLOR: tuple[int, int, int, int] = (255, 255, 255, 255)     # white
+_BEAT_ACCENT_COLOR: tuple[int, int, int, int] = (0, 200, 255, 180)     # cyan
+_TAKEAWAY_TEXT_COLOR: tuple[int, int, int, int] = (80, 255, 160, 255)  # emerald green
+_TAKEAWAY_ACCENT_COLOR: tuple[int, int, int, int] = (0, 230, 120, 230) # bright green
 _DEFAULT_GRADIENT = ((30, 60, 130), (20, 130, 160))  # visible blue → teal
 
 
@@ -313,7 +321,7 @@ def create_scene_image(
             lb = hook_font.getbbox(line)
             lx = (width - (lb[2] - lb[0])) // 2
             _draw_text_with_shadow(ov_draw, (lx, text_y), line,
-                                   font=hook_font, fill=(255, 220, 50, 255),
+                                   font=hook_font, fill=_HOOK_TEXT_COLOR,
                                    shadow_offset=4, shadow_fill=(0, 0, 0, 220))
             text_y += line_h
 
@@ -322,7 +330,7 @@ def create_scene_image(
         bar_x0 = int(width * 0.25)
         bar_x1 = int(width * 0.75)
         ov_draw.rounded_rectangle([bar_x0, bar_y, bar_x1, bar_y + int(5 * scale)],
-                                   radius=3, fill=(255, 200, 50, 200))
+                                   radius=3, fill=_HOOK_ACCENT_COLOR)
 
     elif scene_type_key == "beat":
         # BEAT: Short phrase in large bold font placed in the lower third.
@@ -358,7 +366,7 @@ def create_scene_image(
             lb = beat_font.getbbox(line)
             lx = (width - (lb[2] - lb[0])) // 2
             _draw_text_with_shadow(ov_draw, (lx, text_y), line,
-                                   font=beat_font, fill=(255, 255, 255, 255),
+                                   font=beat_font, fill=_BEAT_TEXT_COLOR,
                                    shadow_offset=3, shadow_fill=(0, 0, 0, 200))
             text_y += line_h
 
@@ -367,7 +375,7 @@ def create_scene_image(
         bar_x1 = int(width * 0.70)
         bar_y = pill_y0 - int(8 * scale)
         ov_draw.rounded_rectangle([bar_x0, bar_y, bar_x1, bar_y + int(4 * scale)],
-                                   radius=2, fill=(0, 200, 255, 180))
+                                   radius=2, fill=_BEAT_ACCENT_COLOR)
 
     elif scene_type_key == "takeaway":
         # TAKEAWAY: Centred insight phrase with a distinct accent treatment.
@@ -404,13 +412,13 @@ def create_scene_image(
 
         # Accent bar at top of pill
         ov_draw.rounded_rectangle([pill_x0, pill_y0, pill_x1, pill_y0 + int(6 * scale)],
-                                   radius=4, fill=(0, 230, 120, 230))
+                                   radius=4, fill=_TAKEAWAY_ACCENT_COLOR)
 
         for line in lines:
             lb = take_font.getbbox(line)
             lx = (width - (lb[2] - lb[0])) // 2
             _draw_text_with_shadow(ov_draw, (lx, text_y), line,
-                                   font=take_font, fill=(80, 255, 160, 255),
+                                   font=take_font, fill=_TAKEAWAY_TEXT_COLOR,
                                    shadow_offset=3, shadow_fill=(0, 0, 0, 210))
             text_y += line_h
 

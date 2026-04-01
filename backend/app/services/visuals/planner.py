@@ -73,6 +73,8 @@ def generate_scenes_from_script(db: Session, job: VideoJob, script: Script) -> l
         has_code = bool(segment.get("code_snippet", "").strip())
         purpose = segment.get("purpose", "beat")
         scene_type = _scene_type_for_segment(idx, total, purpose, has_code)
+        # Default 4 s per segment matches the Shorts-format target (2–5 s beats).
+        # Legacy scripts that omit duration_seconds will use this 4 s default.
         duration_ms = int(segment.get("duration_seconds", 4) * 1000)
 
         asset_config: dict = {

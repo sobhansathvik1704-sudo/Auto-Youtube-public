@@ -3,6 +3,11 @@ from math import ceil
 
 from app.services.llm.base import BaseLLMProvider
 
+# Target seconds per beat segment when calculating the default beat count.
+# Shorts segments should be short (2–5 s), so each beat covers roughly this
+# many seconds of the overall requested duration.
+_TARGET_SECONDS_PER_BEAT = 7
+
 # Beat templates: (narration, on_screen_text, visual_concept).
 # Each template is filled with {topic} at generation time.
 # on_screen_text: 3-7 words (punchy phrase).
@@ -81,7 +86,7 @@ class LocalLLMProvider(BaseLLMProvider):
         duration_seconds: int,
     ) -> dict:
         # Shorts-first: 1 hook + N beats + 1 takeaway, targeting 2-4s per segment
-        beats_count = max(3, min(5, ceil(duration_seconds / 7)))
+        beats_count = max(3, min(5, ceil(duration_seconds / _TARGET_SECONDS_PER_BEAT)))
         segments_count = beats_count + 2  # +1 hook +1 takeaway
 
         title = f"{topic} in {duration_seconds} seconds"

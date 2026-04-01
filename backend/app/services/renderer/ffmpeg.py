@@ -656,6 +656,22 @@ def _build_fade_filter(scenes: list[Scene]) -> str:
     return ",".join(parts)
 
 
+def _get_video_provider():
+    """Return the configured VideoProvider instance, or ``None`` if disabled."""
+    provider_name = settings.video_provider.lower()
+    if provider_name == "replicate":
+        token = settings.replicate_api_token
+        if not token:
+            logger.warning(
+                "VIDEO_PROVIDER=replicate but REPLICATE_API_TOKEN is not set; "
+                "falling back to Ken Burns"
+            )
+            return None
+        from app.services.video.replicate_provider import ReplicateVideoProvider
+        return ReplicateVideoProvider(api_token=token)
+    return None
+
+
 def _image_to_kenburns_clip(
     image_path: Path,
     duration_s: float,
@@ -825,22 +841,44 @@ def render_video(
         concat_file = output_path.parent / "concat.txt"
         scene_clips: list[Path] = []
 
+        # Resolve text-to-video provider (if configured).
+        video_provider = _get_video_provider()
+
         for scene in scenes:
             scene_image = scene_dir / f"{scene.scene_index:03d}.png"
             create_scene_image(scene, width, height, scene_image, total_scenes=total_scenes)
 
             clip_path = clips_dir / f"scene_{scene.scene_index:03d}.mp4"
             duration_s = scene.duration_ms / 1000.0
-            try:
-                _image_to_kenburns_clip(scene_image, duration_s, clip_path, width, height)
-            except Exception as exc:
-                logger.warning(
-                    "Ken Burns clip failed for scene %d (%s); using static loop",
-                    scene.scene_index,
-                    exc,
-                )
-                # Fallback: simple looped still image via concat demuxer entry (handled below)
-                clip_path = scene_image  # flag: will be handled as a still in concat
+
+            # --- Attempt text-to-video generation (optional) ---
+            used_video_clip = False
+            if video_provider is not None:
+                prompt = getattr(scene, "visual_prompt", None) or getattr(scene, "narration", "") or ""
+                if prompt:
+                    try:
+                        result = video_provider.generate_video(prompt, duration_s, clip_path)
+                        if result is not None:
+                            used_video_clip = True
+                    except (OSError, ValueError, RuntimeError) as exc:
+                        logger.warning(
+                            "Video provider failed for scene %d (%s); falling back to Ken Burns",
+                            scene.scene_index,
+                            exc,
+                        )
+
+            # --- Ken Burns fallback ---
+            if not used_video_clip:
+                try:
+                    _image_to_kenburns_clip(scene_image, duration_s, clip_path, width, height)
+                except Exception as exc:
+                    logger.warning(
+                        "Ken Burns clip failed for scene %d (%s); using static loop",
+                        scene.scene_index,
+                        exc,
+                    )
+                    # Fallback: simple looped still image via concat demuxer entry (handled below)
+                    clip_path = scene_image  # flag: will be handled as a still in concat
             scene_clips.append(clip_path)
 
         # Build concat file for the per-scene clips

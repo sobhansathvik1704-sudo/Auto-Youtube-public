@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     llm_model: str = "local-fallback"
     openai_api_key: str | None = None
     openai_model_name: str = "gpt-4o"
+    gemini_api_key: str | None = None
+    gemini_model_name: str = "gemini-2.0-flash"
 
     tts_provider: str = "local"
     tts_voice: str = "te-en-default"

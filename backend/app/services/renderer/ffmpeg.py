@@ -20,11 +20,15 @@ settings = get_settings()
 
 # Gradient colour schemes per scene type: (top-left colour, bottom-right colour)
 _GRADIENT_SCHEMES: dict[str, tuple[tuple[int, int, int], tuple[int, int, int]]] = {
-    "intro": ((15, 32, 120), (100, 20, 160)),       # blue → purple
-    "outro": ((100, 20, 140), (200, 40, 100)),       # purple → pink
-    "content": ((10, 30, 80), (10, 100, 120)),       # dark blue → teal
+    "intro": ((15, 32, 120), (100, 20, 160)),           # blue → purple
+    "outro": ((100, 20, 140), (200, 40, 100)),           # purple → pink
+    "content": ((10, 60, 120), (20, 130, 160)),          # dark blue → teal
+    "title_card": ((20, 60, 150), (80, 20, 180)),        # royal blue → deep purple
+    "code_card": ((10, 40, 30), (20, 120, 60)),          # dark green → bright green
+    "bullet_explainer": ((30, 80, 160), (10, 160, 180)), # cobalt → cyan
+    "icon_compare": ((120, 30, 60), (200, 80, 20)),      # crimson → amber
 }
-_DEFAULT_GRADIENT = ((12, 24, 60), (20, 80, 100))
+_DEFAULT_GRADIENT = ((30, 60, 130), (20, 130, 160))  # visible blue → teal
 
 
 def _font(size: int, bold: bool = True):
@@ -149,6 +153,7 @@ def create_scene_image(
                 height=height,
                 output_path=output_path,
             )
+        # No code snippet available — fall through to standard card layout below
 
     # --- Background: try HuggingFace AI first, then Pexels, then gradient ---
     scene_type_key = scene.scene_type.lower() if scene.scene_type else ""
